@@ -96,6 +96,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     var opacity: Double = 1.0
     var transform: Transform = Transform()
     var crop: Crop = Crop()
+    var grade: ClipGrade?
     var linkGroupId: String?
     var captionGroupId: String?
 
@@ -115,7 +116,7 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
         case id, mediaRef, mediaType, sourceClipType, startFrame, durationFrames
         case trimStartFrame, trimEndFrame, speed, volume
         case fadeInFrames, fadeOutFrames, fadeInInterpolation, fadeOutInterpolation
-        case opacity, transform, crop
+        case opacity, transform, crop, grade
         case linkGroupId, captionGroupId, textContent, textStyle
         case opacityTrack, positionTrack, scaleTrack, rotationTrack, cropTrack, volumeTrack
     }
@@ -352,6 +353,7 @@ extension Clip {
             opacity: (try? c.decode(Double.self, forKey: .opacity)) ?? 1.0,
             transform: (try? c.decode(Transform.self, forKey: .transform)) ?? Transform(),
             crop: (try? c.decode(Crop.self, forKey: .crop)) ?? Crop(),
+            grade: (try? c.decode(ClipGrade.self, forKey: .grade)),
             linkGroupId: try? c.decode(String.self, forKey: .linkGroupId),
             captionGroupId: try? c.decode(String.self, forKey: .captionGroupId),
             textContent: try? c.decode(String.self, forKey: .textContent),

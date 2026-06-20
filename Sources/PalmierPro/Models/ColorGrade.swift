@@ -110,6 +110,17 @@ struct PrimaryGrade: Codable, Sendable, Equatable {
     }
 }
 
+/// Per-clip grade: a local correction (primaries + curves) and look (LUT) that
+/// stacks *under* the project-wide timeline grade. `nil` field = none.
+struct ClipGrade: Codable, Sendable, Equatable {
+    var primaries: PrimaryGrade?
+    var lut: LUTRef?
+
+    var isIdentity: Bool {
+        (primaries?.isIdentity ?? true) && (lut == nil || lut?.clampedIntensity == 0)
+    }
+}
+
 /// Applies a prebuilt CIFilter chain — the shared processor for preview and export.
 /// `@unchecked Sendable`: the chain is used single-threaded (one export pass / main-thread preview).
 struct FilterChainProcessor: ColorGradeProcessor, @unchecked Sendable {
