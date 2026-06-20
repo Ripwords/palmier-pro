@@ -3,7 +3,9 @@ import SwiftUI
 struct CurveEditorView: View {
     @Environment(EditorViewModel.self) var editor
     @State private var channel: Channel = .master
-    @State private var histogram: [Float] = []
+    @State private var histR: [Float] = []
+    @State private var histG: [Float] = []
+    @State private var histB: [Float] = []
 
     enum Channel: String, CaseIterable, Identifiable {
         case master = "M", red = "R", green = "G", blue = "B"
@@ -32,17 +34,13 @@ struct CurveEditorView: View {
                 let size = CGSize(width: geo.size.width, height: height)
                 ZStack {
                     Canvas { ctx, _ in
-                        // Histogram backdrop (current frame, source).
-                        if histogram.count > 1 {
-                            var hist = Path()
-                            hist.move(to: CGPoint(x: 0, y: size.height))
-                            for (i, v) in histogram.enumerated() {
-                                let x = CGFloat(i) / CGFloat(histogram.count - 1) * size.width
-                                hist.addLine(to: CGPoint(x: x, y: size.height - CGFloat(v) * size.height))
-                            }
-                            hist.addLine(to: CGPoint(x: size.width, y: size.height))
-                            hist.closeSubpath()
-                            ctx.fill(hist, with: .color(channel.tint.opacity(AppTheme.Opacity.faint)))
+                        // RGB parade backdrop — additive so overlaps read as combined color.
+                        if histR.count > 1 {
+                            ctx.blendMode = .plusLighter
+                            ctx.fill(histogramPath(histR, size), with: .color(Color(red: 1, green: 0.22, blue: 0.22).opacity(0.55)))
+                            ctx.fill(histogramPath(histG, size), with: .color(Color(red: 0.25, green: 0.9, blue: 0.35).opacity(0.55)))
+                            ctx.fill(histogramPath(histB, size), with: .color(Color(red: 0.3, green: 0.5, blue: 1).opacity(0.55)))
+                            ctx.blendMode = .normal
                         }
                         // Frame + diagonal reference.
                         let border = Path(CGRect(origin: .zero, size: size))
@@ -83,18 +81,27 @@ struct CurveEditorView: View {
                 .foregroundStyle(AppTheme.Text.mutedColor)
         }
         .onAppear { refreshHistogram() }
-        .onChange(of: channel) { _, _ in refreshHistogram() }
         .onChange(of: editor.currentFrame) { _, _ in refreshHistogram() }
     }
 
-    private func refreshHistogram() {
-        let hChannel: HistogramChannel = switch channel {
-        case .master: .luma
-        case .red: .red
-        case .green: .green
-        case .blue: .blue
+    private func histogramPath(_ bins: [Float], _ size: CGSize) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: size.height))
+        for (i, v) in bins.enumerated() {
+            let x = CGFloat(i) / CGFloat(bins.count - 1) * size.width
+            path.addLine(to: CGPoint(x: x, y: size.height - CGFloat(v) * size.height))
         }
-        histogram = editor.videoEngine?.histogramBins(channel: hChannel) ?? []
+        path.addLine(to: CGPoint(x: size.width, y: size.height))
+        path.closeSubpath()
+        return path
+    }
+
+    private func refreshHistogram() {
+        if let h = editor.videoEngine?.histogramRGB() {
+            histR = h.r; histG = h.g; histB = h.b
+        } else {
+            histR = []; histG = []; histB = []
+        }
     }
 
     // MARK: - Points

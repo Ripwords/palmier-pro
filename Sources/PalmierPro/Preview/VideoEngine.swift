@@ -7,8 +7,6 @@ enum PreviewSeekMode: String {
     case interactiveScrub
 }
 
-enum HistogramChannel { case luma, red, green, blue }
-
 @MainActor
 final class VideoEngine {
     private(set) var player = AVPlayer()
@@ -147,21 +145,15 @@ final class VideoEngine {
         Log.preview.debug("seek state invalidated reason=\(reason)")
     }
 
-    /// 256-bin normalized histogram of the current frame for one channel, or nil
-    /// if no frame is available yet. Reflects the source (pre-grade) frame.
-    func histogramBins(channel: HistogramChannel, count: Int = 256) -> [Float]? {
+    /// Normalized R/G/B histograms of the current frame (source, pre-grade), all
+    /// scaled by the same max so relative channel heights are meaningful. Nil if no
+    /// frame is available yet.
+    func histogramRGB(count: Int = 256) -> (r: [Float], g: [Float], b: [Float])? {
         guard let output = videoOutput,
               let buffer = output.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
         else { return nil }
 
-        var image = CIImage(cvPixelBuffer: buffer)
-        if channel == .luma {
-            let luma = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
-            image = image.applyingFilter("CIColorMatrix", parameters: [
-                "inputRVector": luma, "inputGVector": luma, "inputBVector": luma,
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
-            ])
-        }
+        let image = CIImage(cvPixelBuffer: buffer)
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
 
@@ -174,12 +166,17 @@ final class VideoEngine {
         ciContext.render(hist, toBitmap: &raw, rowBytes: count * 4 * MemoryLayout<Float>.size,
                          bounds: CGRect(x: 0, y: 0, width: count, height: 1), format: .RGBAf, colorSpace: nil)
 
-        let idx = channel == .blue ? 2 : (channel == .green ? 1 : 0)
-        var bins = [Float](repeating: 0, count: count)
-        for i in 0..<count { bins[i] = raw[i * 4 + idx] }
-        let maxV = bins.max() ?? 0
-        if maxV > 0 { for i in 0..<count { bins[i] /= maxV } }
-        return bins
+        var r = [Float](repeating: 0, count: count)
+        var g = r, b = r
+        var maxV: Float = 0
+        for i in 0..<count {
+            r[i] = raw[i * 4]; g[i] = raw[i * 4 + 1]; b[i] = raw[i * 4 + 2]
+            maxV = max(maxV, max(r[i], max(g[i], b[i])))
+        }
+        if maxV > 0 {
+            for i in 0..<count { r[i] /= maxV; g[i] /= maxV; b[i] /= maxV }
+        }
+        return (r, g, b)
     }
 
     // MARK: - Composition
