@@ -124,6 +124,12 @@ struct Clip: Codable, Sendable, Equatable, Identifiable {
     /// Frame where this clip ends on the timeline
     var endFrame: Int { startFrame + durationFrames }
 
+    /// True when the clip carries a non-identity grade — drives the timeline badge.
+    var hasVisibleGrade: Bool {
+        guard let grade else { return false }
+        return !grade.isIdentity
+    }
+
     /// Source frames consumed by the visible portion
     var sourceFramesConsumed: Int { Int((Double(durationFrames) * speed).rounded()) }
 

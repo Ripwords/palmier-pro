@@ -148,6 +148,10 @@ enum ClipRenderer {
             drawOffsetBadge(frames: linkOffset, in: rect, context: context)
         }
 
+        if clip.hasVisibleGrade {
+            drawGradeBadge(in: rect, context: context)
+        }
+
         drawKeyframeMarkers(clip: clip, in: rect, context: context)
 
         drawTrimHandles(in: rect, context: context)
@@ -623,6 +627,28 @@ enum ClipRenderer {
     // MARK: - Out-of-sync offset badge
 
     private static let offsetBadgeColor = NSColor(red: 1.0, green: 0.28, blue: 0.28, alpha: 1.0)
+
+    private static let gradeBadgeFill = NSColor(AppTheme.Accent.primary)
+
+    /// Small dot marking a clip that carries a color grade, in the body's bottom-right.
+    private static func drawGradeBadge(in rect: NSRect, context: CGContext) {
+        let d = volumeKeyframeSize
+        let margin = AppTheme.Spacing.xxs
+        let handleW = Trim.handleWidth
+        let badgeRect = CGRect(
+            x: rect.maxX - handleW - d - margin,
+            y: rect.maxY - d - margin,
+            width: d, height: d
+        )
+        guard badgeRect.minX > rect.minX + AppTheme.Spacing.xs else { return }
+        context.saveGState()
+        context.setFillColor(gradeBadgeFill.cgColor)
+        context.fillEllipse(in: badgeRect)
+        context.setStrokeColor(NSColor.black.withAlphaComponent(AppTheme.Opacity.medium).cgColor)
+        context.setLineWidth(AppTheme.BorderWidth.thin)
+        context.strokeEllipse(in: badgeRect)
+        context.restoreGState()
+    }
 
     private static func drawOffsetBadge(frames: Int, in rect: NSRect, context: CGContext) {
         let text = frames > 0 ? "+\(frames)" : "\(frames)"
