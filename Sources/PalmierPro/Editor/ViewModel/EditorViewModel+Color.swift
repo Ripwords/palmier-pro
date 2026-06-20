@@ -95,8 +95,8 @@ extension EditorViewModel {
     }
 
     /// Mutate a clip's grade, clearing it to nil when the result is identity, and register a
-    /// bidirectional undo. No composition rebuild: SP1 doesn't render clip grades, and a
-    /// per-tick rebuild would only cause a black flash.
+    /// bidirectional undo. The grade renders by re-baking the clip's source on rebuild, so a
+    /// (debounced) rebuild is needed; debouncing coalesces slider/curve drags.
     private func updateClipGrade(clipId: String, actionName: String, _ mutate: (inout ClipGrade) -> Void) {
         guard let loc = findClip(id: clipId) else { return }
         let before = timeline.tracks[loc.trackIndex].clips[loc.clipIndex].grade
@@ -106,7 +106,7 @@ extension EditorViewModel {
         guard before != after else { return }
         timeline.tracks[loc.trackIndex].clips[loc.clipIndex].grade = after
         registerClipGradeSwap(clipId: clipId, undo: before, redo: after, actionName: actionName)
-        videoEngine?.refreshGrade()
+        notifyTimelineChangedDebounced()
     }
 
     private func registerClipGradeSwap(clipId: String, undo: ClipGrade?, redo: ClipGrade?, actionName: String) {
@@ -115,7 +115,7 @@ extension EditorViewModel {
                 vm.timeline.tracks[loc.trackIndex].clips[loc.clipIndex].grade = undo
             }
             vm.registerClipGradeSwap(clipId: clipId, undo: redo, redo: undo, actionName: actionName)
-            vm.videoEngine?.refreshGrade()
+            vm.notifyTimelineChanged()
         }
         undoManager?.setActionName(actionName)
     }

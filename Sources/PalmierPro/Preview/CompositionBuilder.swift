@@ -35,7 +35,8 @@ enum CompositionBuilder {
         timeline: Timeline,
         resolveURL: @Sendable (String) -> URL?,
         resolveSourceSize: @Sendable (String) -> CGSize? = { _ in nil },
-        renderSize: CGSize
+        renderSize: CGSize,
+        bakeGrades: Bool = true
     ) async throws -> CompositionResult {
         Log.preview.info("build fps=\(timeline.fps) size=\(timeline.width)x\(timeline.height) tracks=\(timeline.tracks.count)")
         guard timeline.fps > 0, timeline.width > 0, timeline.height > 0 else {
@@ -71,7 +72,8 @@ enum CompositionBuilder {
                         mediaType: mediaType,
                         resolveURL: resolveURL,
                         resolveSourceSize: resolveSourceSize,
-                        renderSize: renderSize
+                        renderSize: renderSize,
+                        bakeGrades: bakeGrades
                     ) {
                     case .loaded(let asset, let track): source = (asset, track)
                     case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
@@ -156,7 +158,8 @@ enum CompositionBuilder {
                     mediaType: mediaType,
                     resolveURL: resolveURL,
                     resolveSourceSize: resolveSourceSize,
-                    renderSize: renderSize
+                    renderSize: renderSize,
+                    bakeGrades: bakeGrades
                 ) {
                 case .loaded(let asset, let track): source = (asset, track)
                 case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
@@ -247,9 +250,10 @@ enum CompositionBuilder {
         mediaType: AVMediaType,
         resolveURL: @Sendable (String) -> URL?,
         resolveSourceSize: @Sendable (String) -> CGSize?,
-        renderSize: CGSize
+        renderSize: CGSize,
+        bakeGrades: Bool
     ) async throws -> LoadOutcome {
-        let mediaURL: URL
+        var mediaURL: URL
         guard let resolved = resolveURL(clip.mediaRef) else { return .offline }
         // A failed generation on a present file is unprocessable; on a missing file it's offline.
         let sourceExists = FileManager.default.fileExists(atPath: resolved.path)
@@ -283,6 +287,16 @@ enum CompositionBuilder {
             mediaURL = (try? await AlphaVideoNormalizer.premultipliedVideo(for: resolved, mediaRef: clip.mediaRef)) ?? resolved
         } else {
             mediaURL = resolved
+        }
+
+        // Bake the clip's grade into a cached copy of its source; geometry is derived from
+        // whatever track we insert, so the graded copy is just another source.
+        if bakeGrades, mediaType == .video, clip.hasVisibleGrade, let grade = clip.grade {
+            if let graded = try? await ClipGradeBaker.shared.bakedURL(forSource: mediaURL, grade: grade) {
+                mediaURL = graded
+            } else {
+                Log.preview.error("clip-grade bake failed — using ungraded source. clipId=\(clip.id)")
+            }
         }
 
         guard !Task.isCancelled else { throw CancellationError() }

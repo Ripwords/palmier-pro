@@ -266,7 +266,8 @@ final class ExportService {
             let result = try await CompositionBuilder.build(
                 timeline: timeline,
                 resolveURL: { resolver.resolveURL(for: $0) },
-                renderSize: renderSize
+                renderSize: renderSize,
+                bakeGrades: false
             )
             try? FileManager.default.removeItem(at: outputURL)
             Log.export.notice("hdr export start size=\(Int(renderSize.width))x\(Int(renderSize.height)) url=\(outputURL.lastPathComponent)")
