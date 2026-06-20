@@ -9,6 +9,7 @@ private let histogramBlue = Color(red: 0.3, green: 0.5, blue: 1)
 struct CurveEditorView: View {
     @Environment(EditorViewModel.self) var editor
     @State private var channel: Channel = .master
+    @State private var lastTap: (index: Int, time: Date)?
     @State private var histR: [Float] = []
     @State private var histG: [Float] = []
     @State private var histB: [Float] = []
@@ -70,9 +71,16 @@ struct CurveEditorView: View {
                             .position(point(pt, size))
                             .gesture(
                                 DragGesture(minimumDistance: 0)
-                                    .onChanged { drag(index: index, to: $0.location, size: size) }
+                                    .onChanged { value in
+                                        if abs(value.translation.width) > 2 || abs(value.translation.height) > 2 {
+                                            drag(index: index, to: value.location, size: size)
+                                        }
+                                    }
+                                    .onEnded { value in
+                                        let moved = abs(value.translation.width) > 2 || abs(value.translation.height) > 2
+                                        if !moved { handleTap(index: index) }
+                                    }
                             )
-                            .onTapGesture(count: 2) { removePoint(at: index) }
                     }
                 }
             }
@@ -84,6 +92,7 @@ struct CurveEditorView: View {
         }
         .onAppear { refreshHistogram() }
         .onChange(of: editor.currentFrame) { _, _ in refreshHistogram() }
+        .onChange(of: editor.isPlaying) { _, playing in if !playing { refreshHistogram() } }
     }
 
     private func histogramPath(_ bins: [Float], _ size: CGSize) -> Path {
@@ -99,10 +108,21 @@ struct CurveEditorView: View {
     }
 
     private func refreshHistogram() {
-        if let h = editor.videoEngine?.histogramRGB() {
-            histR = h.r; histG = h.g; histB = h.b
+        guard let engine = editor.videoEngine, !editor.isPlaying else { return }
+        Task { @MainActor in
+            if let h = await engine.histogramRGB() {
+                histR = h.r; histG = h.g; histB = h.b
+            }
+        }
+    }
+
+    private func handleTap(index: Int) {
+        let now = Date()
+        if let last = lastTap, last.index == index, now.timeIntervalSince(last.time) < 0.4 {
+            removePoint(at: index)
+            lastTap = nil
         } else {
-            histR = []; histG = []; histB = []
+            lastTap = (index, now)
         }
     }
 

@@ -30,7 +30,6 @@ final class VideoEngine {
     private var lastInteractiveDispatchTime: TimeInterval = 0
 
     private let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
-    private var videoOutput: AVPlayerItemVideoOutput?
 
     init(editor: EditorViewModel) {
         self.editor = editor
@@ -132,28 +131,22 @@ final class VideoEngine {
 
     private func replacePlayerItem(_ item: AVPlayerItem?, reason: String) {
         invalidateSeekState()
-        if let item {
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            ])
-            item.add(output)
-            videoOutput = output
-        } else {
-            videoOutput = nil
-        }
         player.replaceCurrentItem(with: item)
         Log.preview.debug("seek state invalidated reason=\(reason)")
     }
 
-    /// Normalized R/G/B histograms of the current frame (source, pre-grade), all
-    /// scaled by the same max so relative channel heights are meaningful. Nil if no
-    /// frame is available yet.
-    func histogramRGB(count: Int = 256) -> (r: [Float], g: [Float], b: [Float])? {
-        guard let output = videoOutput,
-              let buffer = output.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
-        else { return nil }
+    /// Normalized R/G/B histograms of the composited frame at the playhead (source,
+    /// pre-grade), scaled by a shared max. Nil if no frame can be generated.
+    func histogramRGB(count: Int = 256) async -> (r: [Float], g: [Float], b: [Float])? {
+        guard let item = player.currentItem else { return nil }
+        let generator = AVAssetImageGenerator(asset: item.asset)
+        generator.videoComposition = item.videoComposition
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        generator.maximumSize = CGSize(width: 320, height: 180)
+        guard let cg = try? await generator.image(at: player.currentTime()).image else { return nil }
 
-        let image = CIImage(cvPixelBuffer: buffer)
+        let image = CIImage(cgImage: cg)
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
 

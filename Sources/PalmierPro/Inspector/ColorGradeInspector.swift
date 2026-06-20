@@ -43,14 +43,25 @@ struct ColorGradeInspector: View {
             }
 
             InspectorRow(icon: "square.stack.3d.forward.dottedline", label: "Custom LUT") {
-                Button(action: loadLUT) {
-                    Text(cubeLabel)
-                        .font(.system(size: AppTheme.FontSize.xs))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                HStack(spacing: AppTheme.Spacing.xs) {
+                    Button(action: loadLUT) {
+                        Text(cubeLabel)
+                            .font(.system(size: AppTheme.FontSize.xs))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(AppTheme.Accent.primary)
+                    if grade?.kind == .cube {
+                        Button { editor.setColorGrade(nil) } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: AppTheme.FontSize.xs))
+                                .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove LUT")
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(AppTheme.Accent.primary)
             }
 
             InspectorRow(icon: "swatchpalette", label: "LUT Library") {
