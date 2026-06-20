@@ -28,6 +28,28 @@ struct ClipGradeBakerTests {
         #expect(k1 != k3)
     }
 
+    @Test func cacheKeyVariesByRenderSize() {
+        var p = PrimaryGrade(); p.temperature = 50
+        let g = ClipGrade(primaries: p, lut: nil)
+        let src = URL(fileURLWithPath: "/tmp/a.mov")
+        let full = ClipGradeBaker.cacheKey(sourceURL: src, grade: g, renderSize: nil)
+        let small = ClipGradeBaker.cacheKey(sourceURL: src, grade: g, renderSize: CGSize(width: 640, height: 360))
+        #expect(full != small)
+    }
+
+    @Test func bakeDownscalesToRenderSize() async throws {
+        let src = try await Self.makeSolidGrayVideo()  // 32x32
+        defer { try? FileManager.default.removeItem(at: src) }
+        var warm = PrimaryGrade(); warm.temperature = 60
+        let baked = try await ClipGradeBaker.shared.bakedURL(
+            forSource: src, grade: ClipGrade(primaries: warm, lut: nil),
+            renderSize: CGSize(width: 16, height: 16)
+        )
+        let track = try #require(try await AVURLAsset(url: baked).loadTracks(withMediaType: .video).first)
+        let size = try await track.load(.naturalSize)
+        #expect(Int(size.width) == 16 && Int(size.height) == 16, "bake should honor renderSize, got \(size)")
+    }
+
     @Test func cacheKeyVariesBySource() {
         var p = PrimaryGrade(); p.temperature = 50
         let g = ClipGrade(primaries: p, lut: nil)

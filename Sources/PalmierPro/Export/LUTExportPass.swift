@@ -9,16 +9,23 @@ enum LUTExportPass {
         to inputURL: URL,
         fileType: AVFileType,
         preset: String,
-        outputURL: URL? = nil
+        outputURL: URL? = nil,
+        renderSize: CGSize? = nil
     ) async throws -> URL {
         let colorSpace = GradePipeline.workingColorSpace
         let asset = AVURLAsset(url: inputURL)
 
-        let videoComposition = try await AVVideoComposition.videoComposition(
+        var videoComposition = try await AVVideoComposition.videoComposition(
             with: asset
         ) { request in
             let graded = processor.process(request.sourceImage.clampedToExtent(), colorSpace: colorSpace)
             request.finish(with: graded.cropped(to: request.sourceImage.extent), context: nil)
+        }
+
+        // Downscale the graded output (preview proxies) by overriding the render size.
+        if let renderSize, let mutable = videoComposition.mutableCopy() as? AVMutableVideoComposition {
+            mutable.renderSize = renderSize
+            videoComposition = mutable
         }
 
         guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {

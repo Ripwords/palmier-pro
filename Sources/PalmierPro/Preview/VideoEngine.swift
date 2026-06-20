@@ -189,11 +189,13 @@ final class VideoEngine {
         rebuildTask = Task {
             let result: CompositionResult
             do {
+                let canvas = CGSize(width: editor.timeline.width, height: editor.timeline.height)
                 result = try await CompositionBuilder.build(
                     timeline: editor.timeline,
                     resolveURL: { resolver.resolveURL(for: $0) },
                     resolveSourceSize: { assetSizes[$0] },
-                    renderSize: CGSize(width: editor.timeline.width, height: editor.timeline.height)
+                    renderSize: canvas,
+                    gradeRenderSize: Self.previewGradeSize(canvas)
                 )
             } catch {
                 if !Task.isCancelled {
@@ -351,4 +353,15 @@ final class VideoEngine {
     }
 
     private static let interactiveSeekInterval: TimeInterval = 1.0 / 30.0
+
+    /// Preview grade bakes are capped to ~1080p so re-encodes stay fast; export bakes full-res.
+    static func previewGradeSize(_ canvas: CGSize) -> CGSize {
+        let maxLong: CGFloat = 1920
+        let long = max(canvas.width, canvas.height)
+        guard long > maxLong, long > 0 else { return canvas }
+        let scale = maxLong / long
+        let w = (Int((canvas.width * scale).rounded()) / 2) * 2
+        let h = (Int((canvas.height * scale).rounded()) / 2) * 2
+        return CGSize(width: max(2, w), height: max(2, h))
+    }
 }

@@ -36,7 +36,8 @@ enum CompositionBuilder {
         resolveURL: @Sendable (String) -> URL?,
         resolveSourceSize: @Sendable (String) -> CGSize? = { _ in nil },
         renderSize: CGSize,
-        bakeGrades: Bool = true
+        bakeGrades: Bool = true,
+        gradeRenderSize: CGSize? = nil
     ) async throws -> CompositionResult {
         Log.preview.info("build fps=\(timeline.fps) size=\(timeline.width)x\(timeline.height) tracks=\(timeline.tracks.count)")
         guard timeline.fps > 0, timeline.width > 0, timeline.height > 0 else {
@@ -73,7 +74,8 @@ enum CompositionBuilder {
                         resolveURL: resolveURL,
                         resolveSourceSize: resolveSourceSize,
                         renderSize: renderSize,
-                        bakeGrades: bakeGrades
+                        bakeGrades: bakeGrades,
+                        gradeRenderSize: gradeRenderSize
                     ) {
                     case .loaded(let asset, let track): source = (asset, track)
                     case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
@@ -159,7 +161,8 @@ enum CompositionBuilder {
                     resolveURL: resolveURL,
                     resolveSourceSize: resolveSourceSize,
                     renderSize: renderSize,
-                    bakeGrades: bakeGrades
+                    bakeGrades: bakeGrades,
+                    gradeRenderSize: gradeRenderSize
                 ) {
                 case .loaded(let asset, let track): source = (asset, track)
                 case .offline: offlineMediaRefs.insert(clip.mediaRef); continue
@@ -251,7 +254,8 @@ enum CompositionBuilder {
         resolveURL: @Sendable (String) -> URL?,
         resolveSourceSize: @Sendable (String) -> CGSize?,
         renderSize: CGSize,
-        bakeGrades: Bool
+        bakeGrades: Bool,
+        gradeRenderSize: CGSize?
     ) async throws -> LoadOutcome {
         var mediaURL: URL
         guard let resolved = resolveURL(clip.mediaRef) else { return .offline }
@@ -292,7 +296,7 @@ enum CompositionBuilder {
         // Bake the clip's grade into a cached copy of its source; geometry is derived from
         // whatever track we insert, so the graded copy is just another source.
         if bakeGrades, mediaType == .video, clip.hasVisibleGrade, let grade = clip.grade {
-            if let graded = try? await ClipGradeBaker.shared.bakedURL(forSource: mediaURL, grade: grade) {
+            if let graded = try? await ClipGradeBaker.shared.bakedURL(forSource: mediaURL, grade: grade, renderSize: gradeRenderSize) {
                 mediaURL = graded
             } else {
                 Log.preview.error("clip-grade bake failed — using ungraded source. clipId=\(clip.id)")

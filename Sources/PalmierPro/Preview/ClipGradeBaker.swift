@@ -12,12 +12,13 @@ actor ClipGradeBaker {
     private let cap = 24
 
     /// Returns a graded copy of `sourceURL` for `grade`, reusing a cached bake when possible.
-    func bakedURL(forSource sourceURL: URL, grade: ClipGrade) async throws -> URL {
+    /// `renderSize` downscales the output (preview proxies); nil bakes at full source resolution.
+    func bakedURL(forSource sourceURL: URL, grade: ClipGrade, renderSize: CGSize? = nil) async throws -> URL {
         guard !grade.isIdentity else { return sourceURL }
         let filters = GradePipeline.filters(primaries: grade.primaries, lut: grade.lut)
         guard !filters.isEmpty else { return sourceURL }
 
-        let key = Self.cacheKey(sourceURL: sourceURL, grade: grade)
+        let key = Self.cacheKey(sourceURL: sourceURL, grade: grade, renderSize: renderSize)
         if let cached = cache[key], FileManager.default.fileExists(atPath: cached.path) {
             touch(key)
             return cached
@@ -27,7 +28,7 @@ actor ClipGradeBaker {
         }
 
         let task = Task<URL, Error> {
-            try await Self.bake(sourceURL: sourceURL, filters: filters, key: key)
+            try await Self.bake(sourceURL: sourceURL, filters: filters, key: key, renderSize: renderSize)
         }
         inFlight[key] = task
         defer { inFlight[key] = nil }
@@ -52,7 +53,7 @@ actor ClipGradeBaker {
         }
     }
 
-    private static func bake(sourceURL: URL, filters: [CIFilter], key: String) async throws -> URL {
+    private static func bake(sourceURL: URL, filters: [CIFilter], key: String, renderSize: CGSize?) async throws -> URL {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("clip-grade-\(key).mov")
         Log.preview.notice("clip-grade bake start key=\(key)")
@@ -61,14 +62,15 @@ actor ClipGradeBaker {
             to: sourceURL,
             fileType: .mov,
             preset: AVAssetExportPresetHighestQuality,
-            outputURL: outputURL
+            outputURL: outputURL,
+            renderSize: renderSize
         )
         Log.preview.notice("clip-grade bake ok key=\(key)")
         return graded
     }
 
-    /// FNV-1a over the source path and the grade's encoded bytes; stable across runs.
-    static func cacheKey(sourceURL: URL, grade: ClipGrade) -> String {
+    /// FNV-1a over the source path, grade bytes, and render size; stable across runs.
+    static func cacheKey(sourceURL: URL, grade: ClipGrade, renderSize: CGSize? = nil) -> String {
         var hash: UInt64 = 0xcbf29ce484222325
         func mix(_ bytes: some Sequence<UInt8>) {
             for b in bytes {
@@ -81,6 +83,9 @@ actor ClipGradeBaker {
         encoder.outputFormatting = .sortedKeys
         if let data = try? encoder.encode(grade) {
             mix(data)
+        }
+        if let renderSize {
+            mix("\(Int(renderSize.width))x\(Int(renderSize.height))".utf8)
         }
         return String(hash, radix: 16)
     }
