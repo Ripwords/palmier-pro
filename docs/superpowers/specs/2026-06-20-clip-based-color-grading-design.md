@@ -35,6 +35,23 @@ shots without abandoning a global look.
 
 ## Rendering architecture
 
+> **Revision 2 (implementation outcome):** the custom-compositor approach below was
+> **abandoned during implementation** for two concrete, code-verified reasons:
+> (1) a `customVideoCompositorClass` disables `AVVideoCompositionCoreAnimationTool`
+> (`ExportService.makeExportSession`), which bakes text into exports — using it would
+> silently drop text from every export; (2) it would require reimplementing the entire
+> proven transform/opacity/crop/PiP geometry path. **Shipped instead: pre-baked graded
+> intermediates** (the rejected-alternative below, revived). `ClipGradeBaker` bakes each
+> graded clip's *source* into a cached temp asset; `CompositionBuilder.loadSource` inserts
+> the graded copy in place of the original. Because `CompositionBuilder` derives all
+> geometry from whatever track it inserts, the composition geometry and the text-export
+> `CoreAnimationTool` are untouched — zero regression — and clip grades render in preview
+> and SDR export through the existing pipeline. Cost: a re-bake on grade edits, mitigated
+> by an in-actor + on-disk cache keyed by `(sourcePath, grade)` and a debounced rebuild.
+> HDR export opts out (`build(bakeGrades: false)`) so HDR is unchanged per scope. The
+> stacking order is preserved: clip grade baked into the source, timeline grade still the
+> post-pass on top. The sections below are retained as the original design record.
+
 The locked stacking order (clip → then timeline): **clip grades are baked into the
 composited frame by a custom video compositor; the timeline grade stays a post-pass on
 top** (preview `CALayer.filters`, export second pass). Both preview and export render
