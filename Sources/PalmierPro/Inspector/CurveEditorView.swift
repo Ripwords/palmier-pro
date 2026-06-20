@@ -134,7 +134,7 @@ struct CurveEditorView: View {
     }
 
     private var channelPoints: [CurvePoint] {
-        let c = editor.timeline.primaries?.curve ?? GradeCurve()
+        let c = editor.gradedPrimaries?.curve ?? GradeCurve()
         switch channel {
         case .master: return c.master
         case .red: return c.red
@@ -181,7 +181,7 @@ struct CurveEditorView: View {
     }
 
     private func commit(_ pts: [CurvePoint]) {
-        var p = editor.timeline.primaries ?? PrimaryGrade()
+        var p = editor.gradedPrimaries ?? PrimaryGrade()
         var c = p.curve ?? GradeCurve()
         let value = (pts == GradeCurve.identityPoints) ? [] : pts
         switch channel {
@@ -191,6 +191,6 @@ struct CurveEditorView: View {
         case .blue: c.blue = value
         }
         p.curve = c.isIdentity ? nil : c
-        editor.setColorPrimaries(p)
+        editor.setGradedPrimaries(p)
     }
 }

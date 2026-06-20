@@ -6,13 +6,25 @@ struct ColorGradeInspector: View {
     @Environment(EditorViewModel.self) var editor
     @State private var lutLibrary = LUTLibrary.shared
 
-    private var grade: LUTRef? { editor.timeline.lut }
+    private var grade: LUTRef? { editor.gradedLUT }
 
     private let sliderWidth: CGFloat = 90
     private let valueWidth: CGFloat = 32
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+            HStack(spacing: AppTheme.Spacing.xs) {
+                Image(systemName: editor.gradingScope == .timeline ? "timeline.selection" : "film")
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                Text(editor.gradingScopeLabel)
+                    .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.medium))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Divider().opacity(AppTheme.Opacity.faint)
+
             InspectorRow(icon: "camera.filters", label: "Look") {
                 Picker("", selection: lookBinding) {
                     Text("None").tag("none")
@@ -53,7 +65,7 @@ struct ColorGradeInspector: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(AppTheme.Accent.primary)
                     if grade?.kind == .cube {
-                        Button { editor.setColorGrade(nil) } label: {
+                        Button { editor.setGradedLUT(nil) } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: AppTheme.FontSize.xs))
                                 .foregroundStyle(AppTheme.Text.tertiaryColor)
@@ -88,7 +100,7 @@ struct ColorGradeInspector: View {
             }
 
             if grade != nil {
-                Button { editor.setColorGrade(nil) } label: {
+                Button { editor.setGradedLUT(nil) } label: {
                     Text("Clear grade")
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(AppTheme.Text.tertiaryColor)
@@ -110,8 +122,8 @@ struct ColorGradeInspector: View {
             Divider().opacity(AppTheme.Opacity.faint)
             CurveEditorView()
 
-            if editor.timeline.primaries != nil {
-                Button { editor.setColorPrimaries(nil) } label: {
+            if editor.gradedPrimaries != nil {
+                Button { editor.setGradedPrimaries(nil) } label: {
                     Text("Reset adjustments")
                         .font(.system(size: AppTheme.FontSize.xs))
                         .foregroundStyle(AppTheme.Text.tertiaryColor)
@@ -128,7 +140,7 @@ struct ColorGradeInspector: View {
                     .controlSize(.mini)
                     .tint(AppTheme.Accent.primary)
                     .frame(width: sliderWidth)
-                Text("\(Int(editor.timeline.primaries?[keyPath: kp] ?? 0))")
+                Text("\(Int(editor.gradedPrimaries?[keyPath: kp] ?? 0))")
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
                     .monospacedDigit()
@@ -139,11 +151,11 @@ struct ColorGradeInspector: View {
 
     private func primaryBinding(_ kp: WritableKeyPath<PrimaryGrade, Double>) -> Binding<Double> {
         Binding(
-            get: { editor.timeline.primaries?[keyPath: kp] ?? 0 },
+            get: { editor.gradedPrimaries?[keyPath: kp] ?? 0 },
             set: { value in
-                var p = editor.timeline.primaries ?? PrimaryGrade()
+                var p = editor.gradedPrimaries ?? PrimaryGrade()
                 p[keyPath: kp] = value
-                editor.setColorPrimaries(p)
+                editor.setGradedPrimaries(p)
             }
         )
     }
@@ -158,9 +170,9 @@ struct ColorGradeInspector: View {
             get: { grade?.kind == .look ? (grade?.lookID ?? "none") : "none" },
             set: { id in
                 if id == "none" {
-                    editor.setColorGrade(nil)
+                    editor.setGradedLUT(nil)
                 } else {
-                    editor.setColorGrade(.look(id, intensity: grade?.clampedIntensity ?? 1.0))
+                    editor.setGradedLUT(.look(id, intensity: grade?.clampedIntensity ?? 1.0))
                 }
             }
         )
@@ -170,9 +182,9 @@ struct ColorGradeInspector: View {
         Binding(
             get: { grade?.clampedIntensity ?? 1.0 },
             set: { value in
-                guard var updated = editor.timeline.lut else { return }
+                guard var updated = editor.gradedLUT else { return }
                 updated.intensity = value
-                editor.setColorGrade(updated)
+                editor.setGradedLUT(updated)
             }
         )
     }
@@ -190,7 +202,7 @@ struct ColorGradeInspector: View {
         guard let text = try? String(contentsOf: url, encoding: .utf8),
               let cube = try? CubeLUTParser.parse(text) else { return }
         let name = url.deletingPathExtension().lastPathComponent
-        editor.setColorGrade(.cube(cube, name: name, intensity: grade?.clampedIntensity ?? 1.0))
+        editor.setGradedLUT(.cube(cube, name: name, intensity: grade?.clampedIntensity ?? 1.0))
     }
 
     private func chooseLUTFolder() {
