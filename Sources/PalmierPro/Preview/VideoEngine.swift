@@ -1,10 +1,13 @@
 import AVFoundation
 import AppKit
+import CoreImage
 
 enum PreviewSeekMode: String {
     case exact
     case interactiveScrub
 }
+
+enum HistogramChannel { case luma, red, green, blue }
 
 @MainActor
 final class VideoEngine {
@@ -27,6 +30,9 @@ final class VideoEngine {
     private var pendingInteractiveSeek: (time: CMTime, tolerance: CMTime)?
     private var interactiveThrottleTask: Task<Void, Never>?
     private var lastInteractiveDispatchTime: TimeInterval = 0
+
+    private let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
+    private var videoOutput: AVPlayerItemVideoOutput?
 
     init(editor: EditorViewModel) {
         self.editor = editor
@@ -128,8 +134,52 @@ final class VideoEngine {
 
     private func replacePlayerItem(_ item: AVPlayerItem?, reason: String) {
         invalidateSeekState()
+        if let item {
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            ])
+            item.add(output)
+            videoOutput = output
+        } else {
+            videoOutput = nil
+        }
         player.replaceCurrentItem(with: item)
         Log.preview.debug("seek state invalidated reason=\(reason)")
+    }
+
+    /// 256-bin normalized histogram of the current frame for one channel, or nil
+    /// if no frame is available yet. Reflects the source (pre-grade) frame.
+    func histogramBins(channel: HistogramChannel, count: Int = 256) -> [Float]? {
+        guard let output = videoOutput,
+              let buffer = output.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
+        else { return nil }
+
+        var image = CIImage(cvPixelBuffer: buffer)
+        if channel == .luma {
+            let luma = CIVector(x: 0.2126, y: 0.7152, z: 0.0722, w: 0)
+            image = image.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": luma, "inputGVector": luma, "inputBVector": luma,
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+            ])
+        }
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return nil }
+
+        let hist = image.applyingFilter("CIAreaHistogram", parameters: [
+            kCIInputExtentKey: CIVector(cgRect: extent),
+            "inputScale": 1.0,
+            "inputCount": count,
+        ])
+        var raw = [Float](repeating: 0, count: count * 4)
+        ciContext.render(hist, toBitmap: &raw, rowBytes: count * 4 * MemoryLayout<Float>.size,
+                         bounds: CGRect(x: 0, y: 0, width: count, height: 1), format: .RGBAf, colorSpace: nil)
+
+        let idx = channel == .blue ? 2 : (channel == .green ? 1 : 0)
+        var bins = [Float](repeating: 0, count: count)
+        for i in 0..<count { bins[i] = raw[i * 4 + idx] }
+        let maxV = bins.max() ?? 0
+        if maxV > 0 { for i in 0..<count { bins[i] /= maxV } }
+        return bins
     }
 
     // MARK: - Composition

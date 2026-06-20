@@ -3,6 +3,7 @@ import SwiftUI
 struct CurveEditorView: View {
     @Environment(EditorViewModel.self) var editor
     @State private var channel: Channel = .master
+    @State private var histogram: [Float] = []
 
     enum Channel: String, CaseIterable, Identifiable {
         case master = "M", red = "R", green = "G", blue = "B"
@@ -31,6 +32,18 @@ struct CurveEditorView: View {
                 let size = CGSize(width: geo.size.width, height: height)
                 ZStack {
                     Canvas { ctx, _ in
+                        // Histogram backdrop (current frame, source).
+                        if histogram.count > 1 {
+                            var hist = Path()
+                            hist.move(to: CGPoint(x: 0, y: size.height))
+                            for (i, v) in histogram.enumerated() {
+                                let x = CGFloat(i) / CGFloat(histogram.count - 1) * size.width
+                                hist.addLine(to: CGPoint(x: x, y: size.height - CGFloat(v) * size.height))
+                            }
+                            hist.addLine(to: CGPoint(x: size.width, y: size.height))
+                            hist.closeSubpath()
+                            ctx.fill(hist, with: .color(channel.tint.opacity(AppTheme.Opacity.faint)))
+                        }
                         // Frame + diagonal reference.
                         let border = Path(CGRect(origin: .zero, size: size))
                         ctx.stroke(border, with: .color(AppTheme.Border.subtleColor), lineWidth: AppTheme.BorderWidth.hairline)
@@ -69,6 +82,19 @@ struct CurveEditorView: View {
                 .font(.system(size: AppTheme.FontSize.xxs))
                 .foregroundStyle(AppTheme.Text.mutedColor)
         }
+        .onAppear { refreshHistogram() }
+        .onChange(of: channel) { _, _ in refreshHistogram() }
+        .onChange(of: editor.currentFrame) { _, _ in refreshHistogram() }
+    }
+
+    private func refreshHistogram() {
+        let hChannel: HistogramChannel = switch channel {
+        case .master: .luma
+        case .red: .red
+        case .green: .green
+        case .blue: .blue
+        }
+        histogram = editor.videoEngine?.histogramBins(channel: hChannel) ?? []
     }
 
     // MARK: - Points
