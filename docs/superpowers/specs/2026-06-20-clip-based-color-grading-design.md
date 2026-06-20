@@ -35,29 +35,72 @@ shots without abandoning a global look.
 
 ## Rendering architecture
 
-The locked stacking order (clip → then timeline) maps onto the existing two-stage
-pipeline, so we **bake clip grades into the composition and keep the timeline grade as a
-post-pass on top**.
+The locked stacking order (clip → then timeline): **clip grades are baked into the
+composited frame by a custom video compositor; the timeline grade stays a post-pass on
+top** (preview `CALayer.filters`, export second pass). Both preview and export render
+through the same compositor, so they match.
 
-### Preview
-- **Today:** `PreviewNSView.applyGrade(primaries:lut:)`
-  (`Sources/PalmierPro/Preview/PreviewView.swift:81`) sets `playerLayer.filters` for the
-  whole `AVPlayerLayer` from `GradePipeline.filters(primaries:lut:)`.
-- **Change:** Keep the layer-filter path for the **timeline** grade. Add an
-  `AVVideoComposition` with a Core Image handler that, per frame, looks up the active
-  video clip by time, builds a `GradePipeline` chain from that clip's `grade`, and applies
-  it. Net effect: composition bakes the clip grade → layer filter applies the timeline
-  grade on top. Stacking order falls out for free.
-- **Cost to watch:** preview moves from a cheap GPU layer filter to per-frame Core Image
-  compositing for clip grades. Standard AVFoundation grading path; expected fine on the
-  M-series target, but this is the performance-sensitive part.
-- **Text overlays** continue to stay ungraded (they are composited separately, above the
-  graded video — the existing guarantee is preserved because the timeline grade remains a
-  layer filter under the overlay layers).
+### Why a custom compositor (correction to original assumption)
+
+The original spec assumed we could attach an `AVVideoComposition` "with a Core Image
+handler" to bake clip grades while keeping the existing per-clip transforms/opacity/crop.
+**That is not possible in AVFoundation.** The two construction paths are mutually
+exclusive:
+
+- `AVVideoComposition(configuration:)` + `AVVideoCompositionLayerInstruction`s → the
+  built-in compositor. This is what `CompositionBuilder.buildVisuals`
+  (`CompositionBuilder.swift:375`) uses today for all geometry (transform/opacity ramps,
+  crop, PiP stacking, black background). It has **no color hook**.
+- `AVVideoComposition.videoComposition(with:applyingCIFiltersWithHandler:)` → a CI color
+  hook, but it **discards layer instructions** and hands you a single flattened source
+  image (no transforms/opacity/crop).
+
+You cannot have both on one composition. Per-clip CI grading that respects geometry
+therefore requires a **custom `AVVideoCompositing` compositor** that does the geometry
+*and* the per-clip grade itself. Today's preview global grade is a whole-layer
+`CALayer.filters` pass (`PreviewView.swift:81`); a single layer filter cannot grade just
+one clip's pixels when clips overlap (PiP / multi-track), which is the second reason the
+layer-filter approach can't carry clip grades.
+
+### Custom compositor design
+
+A new `GradingVideoCompositor: NSObject, AVVideoCompositing` replaces the built-in
+compositor for the project's video composition. Per frame request it:
+
+1. Reads each video composition track's source frame via
+   `request.sourceFrame(byTrackID:)`.
+2. From a per-time-range custom instruction
+   (`GradingCompositionInstruction: AVVideoCompositionInstructionProtocol`) carrying the
+   resolved render info, for each active clip **bottom track → top track**:
+   - applies the clip's `preferredTransform` normalization (`clipTransforms`), crop
+     (`clip.cropAt(frame:)`), and placement affine
+     (`CompositionBuilder.affineTransform(for: clip.transformAt(frame:), …)`) — the **same
+     math** the built-in path uses, reused, not reinvented;
+   - applies the clip's grade via `GradePipeline.filters(primaries:lut:)` built from
+     `clip.grade` (identity → skip);
+   - applies opacity (`clip.opacityAt(frame:)`) and composites source-over onto the
+     accumulator.
+3. Returns the composited buffer via `request.finish(withComposedVideoFrame:)`.
+
+Sampling per-frame directly (`clip.transformAt(frame:)`, `opacityAt`, `cropAt`) replaces
+the built-in path's ramp emission — simpler and frame-exact. The timeline grade is **not**
+applied here; it stays the post-pass.
+
+**Parity gate (risk control):** the compositor is a rewrite of a proven path, so geometry
+correctness is validated by rendering identical frames with **no grades present** through
+both the old built-in composition and the new compositor and asserting they match within a
+small per-pixel tolerance. The new compositor does not ship until parity holds. See the
+plan's frame-parity task.
+
+### Text overlays
+Unchanged. Text composites via a separate `CALayer` tree above the player layer
+(`PreviewNSView`), so it stays ungraded; the timeline grade remains a layer filter under
+the overlay layers.
 
 ### Export (SDR)
-- `CompositionBuilder` attaches the same `AVVideoComposition` so clip grades are baked
-  into the main encode.
+- The export composition uses the same `GradingVideoCompositor`
+  (`videoComposition.customVideoCompositorClass`), so clip grades bake into the main
+  encode with correct geometry.
 - `LUTExportPass` / `applyLUTPassIfNeeded()`
   (`Sources/PalmierPro/Export/ExportService.swift:229`) continues to apply the **timeline**
   grade as the second pass. No change to the post-pass logic.
@@ -66,11 +109,16 @@ post-pass on top**.
 - Unchanged. `HDRVideoExporter` still skips grading (pre-existing limitation, explicitly
   out of scope).
 
-### Rejected alternative
-Baking **both** clip and timeline grades into the compositor and dropping the layer-filter
-path. Cleaner conceptually but discards the working preview path, complicates the
-"text overlays stay ungraded" guarantee, and rewrites export's post-pass. Not worth it
-for v1.
+### Rejected alternatives
+- **CI-filter-handler composition** (original assumption): impossible alongside the
+  geometry layer instructions, as above.
+- **Pre-baked graded intermediates** (render each graded clip's source to a temp asset,
+  point the composition at it): correct and geometry-free, but re-renders on every grade
+  edit — interactive slider/curve dragging would not be live. Rejected for the custom
+  compositor, which grades in the live render path.
+- **Export-only v1** (clip grades bake only at export, preview shows timeline grade only):
+  smallest, but preview gives no feedback on clip grades. Rejected — weakens the workflow
+  this feature exists to strengthen.
 
 ## Data model
 
@@ -122,14 +170,15 @@ var grade: ClipGrade?   // nil = no clip grade; renders identically to today
   timeline clip view. Styled with `AppTheme.IconSize.xs` plus existing border/opacity
   tokens.
 
-## Compositor clip lookup
+## Compositor clip resolution
 
-The `AVVideoComposition` Core Image handler receives a frame `time` and maps it to the
-active video clip via the same timeline→frame math `CompositionBuilder` already uses to
-place clips. It fetches that clip's `grade`, builds a `GradePipeline` filter chain, and
-applies it. For overlapping tracks/transitions, v1 grades per-clip in track order
-(topmost video clip's grade wins for the region it covers); this simplification is
-logged/noted rather than silently chosen.
+The custom compositor resolves, per frame request time, the active clip on **each** video
+composition track (clips within a track are sequential, so exactly one is active per
+track at a time) using the same timeline→frame math `CompositionBuilder` already uses. It
+applies each active clip's geometry + grade and composites bottom-track → top-track, so a
+PiP/overlay clip is graded independently of the clip beneath it — correct overlap
+handling, not just "topmost wins." Transitions (cross-track blends) are out of scope for
+v1 and grade per their own clip; this is noted, not silently chosen.
 
 ## Agent tools
 
@@ -146,13 +195,33 @@ Existing tools in `Sources/PalmierPro/Agent/Tools/ToolExecutor+Color.swift`
 |---|---|
 | Data model — `ClipGrade`, `GradePipeline` | `Sources/PalmierPro/Models/ColorGrade.swift` |
 | Data model — `Clip.grade` | `Sources/PalmierPro/Models/Timeline.swift` |
-| Preview compositor + layer filter | `Sources/PalmierPro/Preview/PreviewView.swift` |
-| Composition build (attach `AVVideoComposition`) | `CompositionBuilder` (composition build path) |
+| Custom compositor (new) | `Sources/PalmierPro/Preview/GradingVideoCompositor.swift` (new), `GradingCompositionInstruction.swift` (new) |
+| Composition build (attach compositor) | `Sources/PalmierPro/Preview/CompositionBuilder.swift` (`buildVisuals`) |
+| Preview timeline-grade layer filter (unchanged role) | `Sources/PalmierPro/Preview/PreviewView.swift` |
 | Export SDR post-pass (unchanged) | `Sources/PalmierPro/Export/ExportService.swift`, `LUTExportPass.swift` |
 | Inspector scope + scope header | `Sources/PalmierPro/Inspector/ColorGradeInspector.swift`, `CurveEditorView.swift`, LUT panel |
 | EditorViewModel grading scope accessor | `Sources/PalmierPro/Editor/ViewModel/EditorViewModel+Color.swift` |
 | Clip badge | timeline clip view |
 | Agent tools `clipId` | `Sources/PalmierPro/Agent/Tools/ToolExecutor+Color.swift` |
+
+## Delivery decomposition
+
+Because the custom compositor is a large rewrite of a proven render path, the work splits
+into three sub-projects, each with its own implementation plan and each independently
+reviewable:
+
+1. **SP1 — Data model + scope plumbing + UI** (this spec's first plan). `ClipGrade`,
+   `Clip.grade`, EditorViewModel grading-scope accessor, inspector rebinding + scope
+   header, clip badge, agent `clipId`. No render-pipeline change; clip grades are stored
+   and editable but not yet visible. Fully unit-testable on its own.
+2. **SP2 — Custom video compositor.** `GradingVideoCompositor` +
+   `GradingCompositionInstruction`, wired into `buildVisuals`, gated by the frame-parity
+   test, then layering in per-clip grade. Makes clip grades visible in preview.
+3. **SP3 — Export integration.** Wire the compositor into the SDR export composition;
+   timeline-grade post-pass unchanged; HDR still out of scope.
+
+SP2 gets its own brainstorm/spec pass before implementation, since its risk and surface
+area warrant dedicated design (compositor color management, performance, parity).
 
 ## Testing strategy
 
@@ -162,7 +231,8 @@ Existing tools in `Sources/PalmierPro/Agent/Tools/ToolExecutor+Color.swift`
   timeline grade (verify filter chain order / sampled output).
 - **Scope resolution:** selection → correct grade target; reset-to-identity clears
   `clip.grade` back to `nil`.
-- **Compositor lookup:** correct clip resolved for a given frame time, including the
-  topmost-wins case for overlaps.
 - **Agent tools:** `clipId` omitted vs provided routes to timeline vs clip grade.
 - **Compatibility:** a project saved before this change loads and renders identically.
+- **Compositor (SP2):** frame-parity — no-grade render through old vs new compositor
+  matches within tolerance; per-clip grade resolution selects the active clip per track at
+  a given time; a graded PiP clip is graded independently of the clip beneath it.
