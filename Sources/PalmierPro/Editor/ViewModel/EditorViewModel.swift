@@ -53,11 +53,18 @@ final class EditorViewModel {
     // MARK: - Transient UI state
 
     var currentFrame: Int = 0 {
-        didSet { playheadState.timelineFrame = currentFrame }
+        didSet {
+            playheadState.timelineFrame = currentFrame
+            videoEngine?.refreshGrade()
+        }
     }
     var activeFrame: Int { playheadState.timelineFrame }
     var isPlaying: Bool = false
-    var selectedClipIds: Set<String> = []
+    var selectedClipIds: Set<String> = [] {
+        didSet {
+            if selectedClipIds != oldValue { videoEngine?.updateLiveGrade() }
+        }
+    }
     var isMarqueeSelecting: Bool = false
     var selectedGap: GapSelection?
     var selectedTimelineRange: TimelineRangeSelection?

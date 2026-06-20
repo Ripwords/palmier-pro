@@ -36,13 +36,13 @@ struct PreviewView: NSViewRepresentable {
         context.coordinator.engine = engine
         editor.videoEngine = engine
         engine.activateTab(editor.activePreviewTab)
-        view.applyGrade(primaries: editor.timeline.primaries, lut: editor.timeline.lut)
+        engine.refreshGrade()
         return view
     }
 
     func updateNSView(_ nsView: PreviewNSView, context: Context) {
         guard let engine = context.coordinator.engine else { return }
-        nsView.applyGrade(primaries: editor.timeline.primaries, lut: editor.timeline.lut)
+        engine.refreshGrade()
         if editor.isPlaying && engine.player.timeControlStatus == .paused {
             engine.play()
         } else if !editor.isPlaying && engine.player.timeControlStatus != .paused {
@@ -74,15 +74,10 @@ final class PreviewNSView: NSView {
     var onCmdScroll: ((CGFloat, CGPoint, CGSize) -> Void)?
 
     private var lastVideoRect: CGRect = .zero
-    private var appliedPrimaries: PrimaryGrade?
-    private var appliedLUT: LUTRef?
 
     /// Live color grade via macOS `CALayer.filters` on the video layer (text stays ungraded).
-    func applyGrade(primaries: PrimaryGrade?, lut: LUTRef?) {
-        guard primaries != appliedPrimaries || lut != appliedLUT else { return }
-        appliedPrimaries = primaries
-        appliedLUT = lut
-        let filters = GradePipeline.filters(primaries: primaries, lut: lut)
+    /// VideoEngine composes and de-dups the filters; this just installs them.
+    func setGradeFilters(_ filters: [CIFilter]) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         playerLayer.filters = filters.isEmpty ? nil : filters

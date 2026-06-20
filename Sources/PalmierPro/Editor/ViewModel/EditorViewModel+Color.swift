@@ -111,7 +111,7 @@ extension EditorViewModel {
         guard before != after else { return }
         timeline.tracks[loc.trackIndex].clips[loc.clipIndex].grade = after
         registerClipGradeSwap(clipId: clipId, undo: before, redo: after, actionName: actionName)
-        notifyTimelineChangedDebounced()
+        videoEngine?.gradeEdited(clipId: clipId)
     }
 
     private func registerClipGradeSwap(clipId: String, undo: ClipGrade?, redo: ClipGrade?, actionName: String) {

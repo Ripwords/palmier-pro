@@ -31,6 +31,22 @@ final class VideoEngine {
 
     private let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
 
+    /// The selected clip whose grade is shown live via the preview layer filter (instead of
+    /// baked into the composition), so editing it updates instantly with no re-encode.
+    private(set) var liveGradeClipId: String?
+    /// True once the composition has been (re)built to render `liveGradeClipId` ungraded, so
+    /// the overlay won't double-apply over a still-baked clip during a pending rebuild.
+    private var liveCompositionReady = true
+    private var lastGradeToken: GradeToken?
+
+    private struct GradeToken: Equatable {
+        var liveClipId: String?
+        var liveClipGrade: ClipGrade?
+        var liveWithinPlayhead: Bool
+        var timelinePrimaries: PrimaryGrade?
+        var timelineLUT: LUTRef?
+    }
+
     init(editor: EditorViewModel) {
         self.editor = editor
         setupTimeObserver()
@@ -195,7 +211,8 @@ final class VideoEngine {
                     resolveURL: { resolver.resolveURL(for: $0) },
                     resolveSourceSize: { assetSizes[$0] },
                     renderSize: canvas,
-                    gradeRenderSize: Self.previewGradeSize(canvas)
+                    gradeRenderSize: Self.previewGradeSize(canvas),
+                    ungradedClipId: liveGradeClipId
                 )
             } catch {
                 if !Task.isCancelled {
@@ -223,13 +240,69 @@ final class VideoEngine {
 
             seek(to: editor.currentFrame, mode: .exact)
             if editor.isPlaying { player.play() }
+            liveCompositionReady = true
+            refreshGrade()
         }
     }
 
-    /// Update the live color grade only — no composition rebuild, no item swap, no flash.
+    /// Recompute the preview layer filters: the live clip's grade (when its source is rendered
+    /// ungraded and the playhead is over it) stacked under the project-wide timeline grade.
     func refreshGrade() {
         guard let editor, let previewView else { return }
-        previewView.applyGrade(primaries: editor.timeline.primaries, lut: editor.timeline.lut)
+        let timelinePrimaries = editor.timeline.primaries
+        let timelineLUT = editor.timeline.lut
+
+        var liveGrade: ClipGrade?
+        var within = false
+        if liveCompositionReady, let liveId = liveGradeClipId,
+           let clip = editor.clipFor(id: liveId), clip.hasVisibleGrade {
+            let f = editor.activeFrame
+            within = f >= clip.startFrame && f < clip.endFrame
+            if within { liveGrade = clip.grade }
+        }
+
+        let token = GradeToken(
+            liveClipId: liveGradeClipId, liveClipGrade: liveGrade, liveWithinPlayhead: within,
+            timelinePrimaries: timelinePrimaries, timelineLUT: timelineLUT
+        )
+        guard token != lastGradeToken else { return }
+        lastGradeToken = token
+
+        var filters: [CIFilter] = []
+        if let liveGrade {
+            filters += GradePipeline.filters(primaries: liveGrade.primaries, lut: liveGrade.lut)
+        }
+        filters += GradePipeline.filters(primaries: timelinePrimaries, lut: timelineLUT)
+        previewView.setGradeFilters(filters)
+    }
+
+    /// Re-resolve which selected clip is graded live. Rebuilds only when a graded clip enters
+    /// or leaves the live role (so its source toggles between baked and ungraded).
+    func updateLiveGrade() {
+        guard let editor else { return }
+        let newLive: String?
+        if case .clip(let id) = editor.gradingScope { newLive = id } else { newLive = nil }
+        guard newLive != liveGradeClipId else { return }
+        let oldHadGrade = liveGradeClipId.flatMap { editor.clipFor(id: $0)?.hasVisibleGrade } ?? false
+        let newHasGrade = newLive.flatMap { editor.clipFor(id: $0)?.hasVisibleGrade } ?? false
+        liveGradeClipId = newLive
+        if oldHadGrade || newHasGrade {
+            liveCompositionReady = false
+            rebuild()
+        } else {
+            liveCompositionReady = true
+            refreshGrade()
+        }
+    }
+
+    /// A clip's grade changed. The live clip updates instantly via the overlay; any other clip
+    /// needs a (debounced) rebuild to re-bake its source.
+    func gradeEdited(clipId: String) {
+        if clipId == liveGradeClipId {
+            refreshGrade()
+        } else {
+            editor?.notifyTimelineChangedDebounced()
+        }
     }
 
     func refreshVisuals() {
