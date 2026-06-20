@@ -231,6 +231,10 @@ struct InspectorView: View {
                                 if let v = selectedVisualClip, v.mediaType == .text { TextTab(clip: v) }
                             case .video:
                                 videoTabContent()
+                                if nonTextVisualClips.count == 1 {
+                                    Divider().opacity(AppTheme.Opacity.faint)
+                                    ColorGradeInspector()
+                                }
                             case .audio:
                                 audioTabContent()
                             case .ai, .none:
