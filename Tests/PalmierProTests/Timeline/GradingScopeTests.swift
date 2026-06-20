@@ -27,10 +27,28 @@ struct GradingScopeTests {
         #expect(vm.gradingScope == .clip(id))
     }
 
-    @Test func timelineScopeWhenMultipleSelected() {
-        let (vm, id) = editorWithVideoClip()
-        vm.selectedClipIds = [id, "other"]
+    @Test func timelineScopeWhenMultipleVisualClipsSelected() {
+        let vm = EditorViewModel()
+        var track = Track(type: .video)
+        let a = Clip(mediaRef: "m1", mediaType: .video, startFrame: 0, durationFrames: 30)
+        let b = Clip(mediaRef: "m2", mediaType: .video, startFrame: 30, durationFrames: 30)
+        track.clips = [a, b]
+        vm.timeline.tracks = [track]
+        vm.selectedClipIds = [a.id, b.id]
         #expect(vm.gradingScope == .timeline)
+    }
+
+    @Test func clipScopeWhenVideoSelectedWithLinkedAudio() {
+        let vm = EditorViewModel()
+        var v = Track(type: .video)
+        let video = Clip(mediaRef: "m1", mediaType: .video, startFrame: 0, durationFrames: 30)
+        v.clips = [video]
+        var a = Track(type: .audio)
+        let audio = Clip(mediaRef: "m1", mediaType: .audio, startFrame: 0, durationFrames: 30)
+        a.clips = [audio]
+        vm.timeline.tracks = [v, a]
+        vm.selectedClipIds = [video.id, audio.id]   // linked pair selected together
+        #expect(vm.gradingScope == .clip(video.id))
     }
 
     @Test func timelineScopeForAudioClip() {

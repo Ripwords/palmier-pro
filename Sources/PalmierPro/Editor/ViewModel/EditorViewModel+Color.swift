@@ -33,12 +33,19 @@ enum GradingScope: Equatable {
 }
 
 extension EditorViewModel {
-    /// A single selected non-audio clip edits that clip's grade; otherwise the timeline grade.
+    /// A single selected visual clip edits that clip's grade; otherwise the timeline grade.
+    /// Counts visual clips only, so a linked video+audio selection still resolves to the video.
     var gradingScope: GradingScope {
-        guard selectedClipIds.count == 1, let id = selectedClipIds.first,
-              let clip = clipFor(id: id), clip.mediaType != .audio else {
-            return .timeline
+        var visualId: String?
+        var count = 0
+        for track in timeline.tracks {
+            for clip in track.clips
+            where selectedClipIds.contains(clip.id) && clip.mediaType.isVisual && clip.mediaType != .text {
+                count += 1
+                visualId = clip.id
+            }
         }
+        guard count == 1, let id = visualId else { return .timeline }
         return .clip(id)
     }
 
