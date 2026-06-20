@@ -184,6 +184,12 @@ final class VideoEngine {
         }
     }
 
+    /// Update the live color grade only — no composition rebuild, no item swap, no flash.
+    func refreshGrade() {
+        guard let editor, let previewView else { return }
+        previewView.applyGrade(primaries: editor.timeline.primaries, lut: editor.timeline.lut)
+    }
+
     func refreshVisuals() {
         guard let editor, editor.activePreviewTab == .timeline,
               let currentItem = player.currentItem,

@@ -10,7 +10,9 @@ extension EditorViewModel {
             vm.setColorGrade(prev)
         }
         undoManager?.setActionName(lut == nil ? "Clear Color Grade (Agent)" : "Apply Color Grade (Agent)")
-        notifyTimelineChanged()
+        // No composition rebuild: the grade renders via CALayer.filters, not the
+        // composition. Rebuilding would only cause a black flash.
+        videoEngine?.refreshGrade()
     }
 
     /// Set or clear the project-wide primary correction (undoable).
@@ -23,6 +25,6 @@ extension EditorViewModel {
             vm.setColorPrimaries(prev)
         }
         undoManager?.setActionName("Adjust Color")
-        notifyTimelineChanged()
+        videoEngine?.refreshGrade()
     }
 }
