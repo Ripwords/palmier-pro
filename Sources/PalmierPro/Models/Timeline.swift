@@ -12,6 +12,9 @@ struct Timeline: Codable, Sendable, Equatable {
     var height: Int = 1080
     var settingsConfigured: Bool = false
     var tracks: [Track] = []
+    /// Optional project-wide color LUT (Phase 1: applied as a final pass at export).
+    /// Optional so existing projects decode unchanged.
+    var lut: LUTRef?
 
     var totalFrames: Int {
         var maxFrame = 0

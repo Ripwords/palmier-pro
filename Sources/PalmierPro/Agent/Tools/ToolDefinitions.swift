@@ -32,6 +32,9 @@ enum ToolName: String, CaseIterable, Sendable {
     case renameFolder = "rename_folder"
     case deleteMedia = "delete_media"
     case deleteFolder = "delete_folder"
+    case applyColorGrade = "apply_color_grade"
+    case clearColorGrade = "clear_color_grade"
+    case listColorGrades = "list_color_grades"
 }
 
 struct AgentTool: @unchecked Sendable {
@@ -42,6 +45,27 @@ struct AgentTool: @unchecked Sendable {
 
 enum ToolDefinitions {
     static let all: [AgentTool] = [
+        AgentTool(
+            name: .listColorGrades,
+            description: "List the built-in color looks available to apply_color_grade. Returns each look's id, name, and a one-line summary of when to use it (e.g. 'moody-forest' for hikes/jungle, 'teal-orange' for travel/adventure). Call this before apply_color_grade when picking a look automatically, so you choose one that matches the footage. Built-in looks need no asset import.",
+            inputSchema: objectSchema()
+        ),
+        AgentTool(
+            name: .applyColorGrade,
+            description: "Apply a project-wide color grade (one look over the whole timeline), realized as a final color pass at export. Use a built-in look by id (see list_color_grades) — the zero-setup path for 'color grade this' / 'make it cinematic' — or a custom imported .cube LUT via lutMediaRef. Pick the look to match the footage (e.g. 'moody-forest' for jungle/hike, 'vibrant-travel' for bright social vlogs). intensity (0–1, default 1) blends the grade with the original; 0.6–0.8 reads as a tasteful default. Calling again replaces the current grade. Note: the grade shows in the exported file; live-preview grading is a separate upcoming feature.",
+            inputSchema: objectSchema(
+                properties: [
+                    "look": ["type": "string", "description": "Built-in look id from list_color_grades (e.g. 'warm-cinematic', 'teal-orange', 'moody-forest', 'vibrant-travel', 'vintage-film', 'clean-neutral'). Provide either look or lutMediaRef."],
+                    "lutMediaRef": ["type": "string", "description": "Asset ID of an imported .cube LUT from get_media. Use instead of look for a custom LUT. Import the .cube first."],
+                    "intensity": ["type": "number", "description": "Grade strength 0–1 (default 1.0). Lower values blend toward the ungraded original."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .clearColorGrade,
+            description: "Remove the project-wide color grade set by apply_color_grade. The next export is ungraded. No-op if none is set.",
+            inputSchema: objectSchema()
+        ),
         AgentTool(
             name: .getTimeline,
             description: "Always call at the start of a session. Returns project settings (fps, resolution, totalFrames), track list with types and order, all clips with their frames and properties, and canGenerate (if false, generation/upscale tools will fail — tell the user to sign in to Palmier and subscribe before attempting them). The clipId/trackId values here are what every other tool accepts.\n\nClip and track fields equal to their defaults are omitted: mediaType 'video', sourceClipType = mediaType, speed 1, volume 1, opacity 1, trims/fades 0, identity transform/crop, default textStyle, track muted/hidden false. Text clips never report trims (no source media).\n\nCaption clips (sharing a captionGroupId) come back per track as captionGroups instead of clips entries: properties common to the group are hoisted into 'shared' and each clip is a [clipId, startFrame, durationFrames, text] row (caption box width/height are auto-fit per text and omitted). Rows are capped at 200 per group — when clipCount exceeds the rows shown, page with startFrame/endFrame. Caption clips whose properties deviate from the group appear individually in clips.",

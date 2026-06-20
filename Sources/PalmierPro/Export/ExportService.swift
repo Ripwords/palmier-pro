@@ -109,6 +109,11 @@ final class ExportService {
             do {
                 Log.export.notice("export start format=\(String(describing: format)) resolution=\(resolution.rawValue) url=\(outputURL.lastPathComponent)")
                 try await session.export(to: outputURL, as: fileType)
+                try await applyLUTPassIfNeeded(
+                    timeline: timeline, resolver: resolver,
+                    format: format, resolution: resolution,
+                    fileType: fileType, outputURL: outputURL
+                )
                 progress = 1.0
                 Log.export.notice("export ok")
             } catch {
@@ -160,6 +165,42 @@ final class ExportService {
             self.error = Log.detail(error)
             Log.export.error("palmier export failed: \(Log.detail(error))")
             return nil
+        }
+    }
+
+    /// If the timeline carries a project LUT, grade the just-exported file in place.
+    /// No-op when there's no LUT, the `.cube` is missing, or intensity is 0.
+    private func applyLUTPassIfNeeded(
+        timeline: Timeline,
+        resolver: MediaResolver,
+        format: ExportFormat,
+        resolution: ExportResolution,
+        fileType: AVFileType,
+        outputURL: URL
+    ) async throws {
+        guard let lutRef = timeline.lut, lutRef.clampedIntensity > 0 else { return }
+        do {
+            let processor: ColorGradeProcessor
+            switch lutRef.source {
+            case .cube(let mediaRef):
+                guard let cubeURL = resolver.resolveURL(for: mediaRef) else { return }
+                let text = try String(contentsOf: cubeURL, encoding: .utf8)
+                processor = try CubeLUTParser.parse(text)
+            case .look(let id):
+                guard let look = ColorGradeCatalog.look(id: id) else { return }
+                processor = look
+            }
+            let gradedURL = try await LUTExportPass.apply(
+                processor: processor, intensity: lutRef.clampedIntensity,
+                to: outputURL, fileType: fileType,
+                preset: exportPresetName(format: format, resolution: resolution)
+            )
+            // Swap the graded file over the original export.
+            try? FileManager.default.removeItem(at: outputURL)
+            try FileManager.default.moveItem(at: gradedURL, to: outputURL)
+        } catch {
+            // Don't fail the whole export over a bad LUT — keep the ungraded file.
+            Log.export.error("lut-pass skipped: \(Log.detail(error))")
         }
     }
 
