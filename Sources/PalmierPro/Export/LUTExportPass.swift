@@ -8,7 +8,8 @@ enum LUTExportPass {
         processor: ColorGradeProcessor,
         to inputURL: URL,
         fileType: AVFileType,
-        preset: String
+        preset: String,
+        outputURL: URL? = nil
     ) async throws -> URL {
         let colorSpace = GradePipeline.workingColorSpace
         let asset = AVURLAsset(url: inputURL)
@@ -25,7 +26,7 @@ enum LUTExportPass {
         }
         session.videoComposition = videoComposition
 
-        let outputURL = FileManager.default.temporaryDirectory
+        let outputURL = outputURL ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("grade-pass-\(UUID().uuidString).\(inputURL.pathExtension)")
         try? FileManager.default.removeItem(at: outputURL)
 

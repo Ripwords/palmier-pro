@@ -41,4 +41,26 @@ struct ColorToolClipIdTests {
             _ = try exec.adjustColor(vm, ["clipId": "nope", "exposure": 10.0])
         }
     }
+
+    @Test func clipGradeDoesNotInheritTimelineGrade() throws {
+        let (exec, vm, id) = setup()
+        var tp = PrimaryGrade(); tp.exposure = 50
+        vm.timeline.primaries = tp
+        _ = try exec.adjustColor(vm, ["clipId": id, "temperature": 20.0])
+        let clipGrade = vm.clipFor(id: id)?.grade?.primaries
+        #expect(clipGrade?.temperature == 20)
+        #expect(clipGrade?.exposure == 0, "must not copy the timeline's exposure onto the clip")
+    }
+
+    @Test func gradingAudioClipThrows() {
+        let vm = EditorViewModel()
+        var track = Track(type: .audio)
+        let clip = Clip(mediaRef: "a1", mediaType: .audio, startFrame: 0, durationFrames: 30)
+        track.clips = [clip]
+        vm.timeline.tracks = [track]
+        let exec = ToolExecutor(editor: vm)
+        #expect(throws: ToolError.self) {
+            _ = try exec.adjustColor(vm, ["clipId": clip.id, "exposure": 10.0])
+        }
+    }
 }

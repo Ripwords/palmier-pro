@@ -94,9 +94,7 @@ extension EditorViewModel {
         }
     }
 
-    /// Mutate a clip's grade, clearing it to nil when the result is identity, and register a
-    /// bidirectional undo. The grade renders by re-baking the clip's source on rebuild, so a
-    /// (debounced) rebuild is needed; debouncing coalesces slider/curve drags.
+    /// Mutate a clip's grade (nil when identity), register undo, and rebuild to re-bake the source.
     private func updateClipGrade(clipId: String, actionName: String, _ mutate: (inout ClipGrade) -> Void) {
         guard let loc = findClip(id: clipId) else { return }
         let before = timeline.tracks[loc.trackIndex].clips[loc.clipIndex].grade

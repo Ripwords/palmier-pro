@@ -5,15 +5,24 @@ extension ToolExecutor {
         .ok(Self.jsonString(["looks": ColorGradeCatalog.catalogJSON]) ?? "{}")
     }
 
-    /// Validates an optional `clipId`. Returns nil for the timeline scope, or throws if the id is unknown.
+    /// Validates an optional `clipId`. Returns nil for the timeline scope, or throws if unknown/non-visual.
     private func resolveColorTarget(_ args: [String: Any], _ editor: EditorViewModel) throws -> String? {
         guard let id = (args["clipId"] as? String)?.trimmingCharacters(in: .whitespaces), !id.isEmpty else {
             return nil
         }
-        guard editor.clipFor(id: id) != nil else {
+        guard let clip = editor.clipFor(id: id) else {
             throw ToolError("clipId not found: \(id)")
         }
+        guard clip.mediaType != .audio, clip.mediaType != .text else {
+            throw ToolError("Clip \(id) is \(clip.mediaType.rawValue) — color grading applies to visual clips only.")
+        }
         return id
+    }
+
+    /// Seed primaries for an edit: the targeted clip's grade, or the timeline grade. Never crosses scopes.
+    private func gradePrimaries(clipId: String?, _ editor: EditorViewModel) -> PrimaryGrade {
+        let existing = clipId == nil ? editor.timeline.primaries : editor.clipFor(id: clipId!)?.grade?.primaries
+        return existing ?? PrimaryGrade()
     }
 
     func applyColorGrade(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
@@ -67,7 +76,7 @@ extension ToolExecutor {
 
     func adjustColor(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let clipId = try resolveColorTarget(args, editor)
-        var p = (clipId.flatMap { editor.clipFor(id: $0)?.grade?.primaries } ?? editor.timeline.primaries) ?? PrimaryGrade()
+        var p = gradePrimaries(clipId: clipId, editor)
         let reset = (args["reset"] as? Bool) == true || (args["reset"] as? NSNumber)?.boolValue == true
         if reset {
             let curve = p.curve
@@ -117,7 +126,7 @@ extension ToolExecutor {
         points.sort { $0.x < $1.x }
 
         let clipId = try resolveColorTarget(args, editor)
-        var p = (clipId.flatMap { editor.clipFor(id: $0)?.grade?.primaries } ?? editor.timeline.primaries) ?? PrimaryGrade()
+        var p = gradePrimaries(clipId: clipId, editor)
         var curve = p.curve ?? GradeCurve()
         let value = (points == GradeCurve.identityPoints) ? [] : points
         switch channel {

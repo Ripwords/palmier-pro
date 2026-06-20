@@ -110,8 +110,7 @@ struct PrimaryGrade: Codable, Sendable, Equatable {
     }
 }
 
-/// Per-clip grade: a local correction (primaries + curves) and look (LUT) that
-/// stacks *under* the project-wide timeline grade. `nil` field = none.
+/// Per-clip correction + look that stacks under the project-wide timeline grade.
 struct ClipGrade: Codable, Sendable, Equatable {
     var primaries: PrimaryGrade?
     var lut: LUTRef?

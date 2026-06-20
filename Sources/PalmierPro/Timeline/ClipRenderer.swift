@@ -644,7 +644,7 @@ enum ClipRenderer {
         context.saveGState()
         context.setFillColor(gradeBadgeFill.cgColor)
         context.fillEllipse(in: badgeRect)
-        context.setStrokeColor(NSColor.black.withAlphaComponent(AppTheme.Opacity.medium).cgColor)
+        context.setStrokeColor(AppTheme.Background.surface.withAlphaComponent(AppTheme.Opacity.medium).cgColor)
         context.setLineWidth(AppTheme.BorderWidth.thin)
         context.strokeEllipse(in: badgeRect)
         context.restoreGState()
