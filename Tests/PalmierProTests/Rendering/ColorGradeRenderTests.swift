@@ -64,6 +64,33 @@ struct ColorGradeRenderTests {
             let a = avg(graded)
             #expect((a.r - a.b) > (base.r - base.b), "warm test .cube should warm the image")
         }
+
+        // Primary grade engine: warm + contrast + saturation + lifted shadows.
+        var primaries = PrimaryGrade()
+        primaries.temperature = 40
+        primaries.contrast = 30
+        primaries.saturation = 25
+        primaries.shadows = 35
+        let pFilters = GradePipeline.filters(primaries: primaries, lut: nil)
+        #expect(!pFilters.isEmpty)
+        let pGraded = FilterChainProcessor(filters: pFilters).process(src, colorSpace: working).cropped(to: src.extent)
+        if let png = ctx.pngRepresentation(of: pGraded, format: .RGBA8, colorSpace: srgb) {
+            try png.write(to: URL(fileURLWithPath: "\(outDir)/grade-primaries.png"))
+        }
+        let pa = avg(pGraded)
+        #expect((pa.r - pa.b) > (base.r - base.b), "warm primaries should warm the image")
+
+        // Curve engine: lift midtones via a master curve.
+        var curveGrade = PrimaryGrade()
+        curveGrade.curve = GradeCurve(master: [.init(x: 0, y: 0), .init(x: 0.5, y: 0.62), .init(x: 1, y: 1)])
+        let cFilters = GradePipeline.filters(primaries: curveGrade, lut: nil)
+        #expect(!cFilters.isEmpty)
+        let cGraded = FilterChainProcessor(filters: cFilters).process(src, colorSpace: working).cropped(to: src.extent)
+        if let png = ctx.pngRepresentation(of: cGraded, format: .RGBA8, colorSpace: srgb) {
+            try png.write(to: URL(fileURLWithPath: "\(outDir)/grade-curve.png"))
+        }
+        let ca = avg(cGraded)
+        #expect((ca.r + ca.g + ca.b) > (base.r + base.g + base.b), "midtone lift should brighten")
     }
 }
 

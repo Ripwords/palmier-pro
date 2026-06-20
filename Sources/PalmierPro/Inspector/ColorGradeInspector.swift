@@ -49,6 +49,22 @@ struct ColorGradeInspector: View {
                 .foregroundStyle(AppTheme.Accent.primary)
             }
 
+            if ResolveLUTLibrary.isAvailable {
+                InspectorRow(icon: "swatchpalette", label: "Resolve LUTs") {
+                    Menu("Browse…") {
+                        ForEach(ResolveLUTLibrary.groups, id: \.category) { group in
+                            Menu(group.category) {
+                                ForEach(group.luts) { lut in
+                                    Button(lut.name) { applyCube(at: lut.url) }
+                                }
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+            }
+
             if grade != nil {
                 Button { editor.setColorGrade(nil) } label: {
                     Text("Clear grade")
@@ -57,7 +73,57 @@ struct ColorGradeInspector: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            Divider().opacity(AppTheme.Opacity.faint)
+
+            sliderRow("Temperature", "thermometer.medium", \.temperature)
+            sliderRow("Tint", "drop", \.tint)
+            sliderRow("Exposure", "sun.max", \.exposure)
+            sliderRow("Contrast", "circle.lefthalf.filled", \.contrast)
+            sliderRow("Saturation", "paintpalette", \.saturation)
+            sliderRow("Vibrance", "sparkles", \.vibrance)
+            sliderRow("Highlights", "sun.max.fill", \.highlights)
+            sliderRow("Shadows", "moon.fill", \.shadows)
+
+            Divider().opacity(AppTheme.Opacity.faint)
+            CurveEditorView()
+
+            if editor.timeline.primaries != nil {
+                Button { editor.setColorPrimaries(nil) } label: {
+                    Text("Reset adjustments")
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                }
+                .buttonStyle(.plain)
+            }
         }
+    }
+
+    private func sliderRow(_ label: String, _ icon: String, _ kp: WritableKeyPath<PrimaryGrade, Double>) -> some View {
+        InspectorRow(icon: icon, label: label) {
+            HStack(spacing: AppTheme.Spacing.sm) {
+                Slider(value: primaryBinding(kp), in: -100...100)
+                    .controlSize(.mini)
+                    .tint(AppTheme.Accent.primary)
+                    .frame(width: 90)
+                Text("\(Int(editor.timeline.primaries?[keyPath: kp] ?? 0))")
+                    .font(.system(size: AppTheme.FontSize.xs))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    .monospacedDigit()
+                    .frame(width: 32, alignment: .trailing)
+            }
+        }
+    }
+
+    private func primaryBinding(_ kp: WritableKeyPath<PrimaryGrade, Double>) -> Binding<Double> {
+        Binding(
+            get: { editor.timeline.primaries?[keyPath: kp] ?? 0 },
+            set: { value in
+                var p = editor.timeline.primaries ?? PrimaryGrade()
+                p[keyPath: kp] = value
+                editor.setColorPrimaries(p)
+            }
+        )
     }
 
     private var cubeLabel: String {
@@ -94,8 +160,12 @@ struct ColorGradeInspector: View {
         panel.allowedContentTypes = [UTType(filenameExtension: "cube") ?? .data]
         panel.allowsMultipleSelection = false
         panel.prompt = "Load LUT"
-        guard panel.runModal() == .OK, let url = panel.url,
-              let text = try? String(contentsOf: url, encoding: .utf8),
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        applyCube(at: url)
+    }
+
+    private func applyCube(at url: URL) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
               let cube = try? CubeLUTParser.parse(text) else { return }
         let name = url.deletingPathExtension().lastPathComponent
         editor.setColorGrade(.cube(cube, name: name, intensity: grade?.clampedIntensity ?? 1.0))
