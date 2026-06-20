@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ColorGradeInspector: View {
     @Environment(EditorViewModel.self) var editor
+    @State private var lutLibrary = LUTLibrary.shared
 
     private var grade: LUTRef? { editor.timeline.lut }
 
@@ -49,19 +50,26 @@ struct ColorGradeInspector: View {
                 .foregroundStyle(AppTheme.Accent.primary)
             }
 
-            if ResolveLUTLibrary.isAvailable {
-                InspectorRow(icon: "swatchpalette", label: "Resolve LUTs") {
-                    Menu("Browse…") {
-                        ForEach(ResolveLUTLibrary.groups, id: \.category) { group in
+            InspectorRow(icon: "swatchpalette", label: "LUT Library") {
+                if lutLibrary.isConfigured {
+                    Menu(lutLibrary.folderName) {
+                        ForEach(lutLibrary.groups, id: \.category) { group in
                             Menu(group.category) {
                                 ForEach(group.luts) { lut in
                                     Button(lut.name) { applyCube(at: lut.url) }
                                 }
                             }
                         }
+                        Divider()
+                        Button("Change Folder…") { chooseLUTFolder() }
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                } else {
+                    Button("Choose Folder…") { chooseLUTFolder() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: AppTheme.FontSize.xs))
+                        .foregroundStyle(AppTheme.Accent.primary)
                 }
             }
 
@@ -169,5 +177,17 @@ struct ColorGradeInspector: View {
               let cube = try? CubeLUTParser.parse(text) else { return }
         let name = url.deletingPathExtension().lastPathComponent
         editor.setColorGrade(.cube(cube, name: name, intensity: grade?.clampedIntensity ?? 1.0))
+    }
+
+    private func chooseLUTFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use Folder"
+        panel.message = "Choose a folder of .cube LUTs (e.g. your DaVinci Resolve LUT folder)."
+        if let suggested = LUTLibrary.suggestedFolder { panel.directoryURL = suggested }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        lutLibrary.setFolder(url)
     }
 }
