@@ -35,6 +35,8 @@ enum ToolName: String, CaseIterable, Sendable {
     case applyColorGrade = "apply_color_grade"
     case clearColorGrade = "clear_color_grade"
     case listColorGrades = "list_color_grades"
+    case adjustColor = "adjust_color"
+    case setColorCurve = "set_color_curve"
 }
 
 struct AgentTool: @unchecked Sendable {
@@ -52,7 +54,7 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .applyColorGrade,
-            description: "Apply a project-wide color grade (one look over the whole timeline), realized as a final color pass at export. Use a built-in look by id (see list_color_grades) — the zero-setup path for 'color grade this' / 'make it cinematic' — or a custom .cube LUT by file path via lutPath (the .cube is parsed and embedded in the project). Pick the look to match the footage (e.g. 'moody-forest' for jungle/hike, 'vibrant-travel' for bright social vlogs). intensity (0–1, default 1) blends the grade with the original; 0.6–0.8 reads as a tasteful default. Calling again replaces the current grade. Note: the grade shows in the exported file; live-preview grading is a separate upcoming feature.",
+            description: "Apply a project-wide color grade (one look over the whole timeline), realized as a final color pass at export. Use a built-in look by id (see list_color_grades) — the zero-setup path for 'color grade this' / 'make it cinematic' — or a custom .cube LUT by file path via lutPath (the .cube is parsed and embedded in the project). Pick the look to match the footage (e.g. 'moody-forest' for jungle/hike, 'vibrant-travel' for bright social vlogs). intensity (0–1, default 1) blends the grade with the original; 0.6–0.8 reads as a tasteful default. Calling again replaces the current look/LUT. Shows live on the canvas and bakes into export. For primary corrections and curves, use adjust_color and set_color_curve.",
             inputSchema: objectSchema(
                 properties: [
                     "look": ["type": "string", "description": "Built-in look id from list_color_grades (e.g. 'warm-cinematic', 'teal-orange', 'moody-forest', 'vibrant-travel', 'vintage-film', 'clean-neutral'). Provide either look or lutPath."],
@@ -65,6 +67,34 @@ enum ToolDefinitions {
             name: .clearColorGrade,
             description: "Remove the project-wide color grade set by apply_color_grade. The next export is ungraded. No-op if none is set.",
             inputSchema: objectSchema()
+        ),
+        AgentTool(
+            name: .adjustColor,
+            description: "Adjust the project-wide primary color correction (shown live on the canvas and baked into export). Each control is −100…100, 0 = no change. Partial updates: only the fields you pass change; the rest keep their current value. Use to balance a shot — e.g. warm it with temperature, recover a hazy sky with contrast + highlights. Pass reset=true to zero all eight controls (curves are kept). Composes with apply_color_grade (looks/LUTs) and set_color_curve.",
+            inputSchema: objectSchema(
+                properties: [
+                    "temperature": ["type": "number", "description": "−100 (cooler) … 100 (warmer)."],
+                    "tint": ["type": "number", "description": "−100 (green) … 100 (magenta)."],
+                    "exposure": ["type": "number", "description": "−100 … 100 (maps to ±2 EV)."],
+                    "contrast": ["type": "number", "description": "−100 … 100."],
+                    "saturation": ["type": "number", "description": "−100 (grayscale) … 100."],
+                    "vibrance": ["type": "number", "description": "−100 … 100 (saturates muted colors more gently)."],
+                    "highlights": ["type": "number", "description": "−100 (recover/darken) … 100 (brighten)."],
+                    "shadows": ["type": "number", "description": "−100 (crush) … 100 (lift)."],
+                    "reset": ["type": "boolean", "description": "Zero all eight primary controls (keeps curves). Ignores other fields."],
+                ]
+            )
+        ),
+        AgentTool(
+            name: .setColorCurve,
+            description: "Set one tone curve of the project grade (shown live + baked into export). Curves map input→output brightness; the master curve affects all channels, red/green/blue shift individual channels (e.g. lift blue shadows for a cool look). Points are [x, y] pairs in 0…1, x = input, y = output, must include endpoints near x=0 and x=1. Pass an empty points array to reset that channel to linear. A gentle S-curve like [[0,0],[0.25,0.2],[0.75,0.8],[1,1]] adds contrast.",
+            inputSchema: objectSchema(
+                properties: [
+                    "channel": ["type": "string", "enum": ["master", "red", "green", "blue"], "description": "Which curve to set."],
+                    "points": ["type": "array", "items": ["type": "array", "items": ["type": "number"]], "description": "[x, y] pairs in 0…1, e.g. [[0,0],[0.5,0.62],[1,1]]. Empty array resets the channel to linear."],
+                ],
+                required: ["channel", "points"]
+            )
         ),
         AgentTool(
             name: .getTimeline,

@@ -78,6 +78,8 @@ final class ToolExecutor {
         case .applyColorGrade: return try applyColorGrade(editor, args)
         case .clearColorGrade: return try clearColorGrade(editor)
         case .listColorGrades: return listColorGrades()
+        case .adjustColor:     return try adjustColor(editor, args)
+        case .setColorCurve:   return try setColorCurve(editor, args)
         }
     }
 

@@ -48,4 +48,66 @@ extension ToolExecutor {
         editor.setColorGrade(nil)
         return .ok(Self.jsonString(["cleared": true]) ?? "{}")
     }
+
+    /// `adjust_color` — set project-wide primary corrections (partial updates).
+    func adjustColor(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        var p = editor.timeline.primaries ?? PrimaryGrade()
+        let reset = (args["reset"] as? Bool) == true || (args["reset"] as? NSNumber)?.boolValue == true
+        if reset {
+            let curve = p.curve
+            p = PrimaryGrade()
+            p.curve = curve
+        } else {
+            func clamp(_ v: Double) -> Double { min(100, max(-100, v)) }
+            func num(_ key: String) -> Double? { (args[key] as? NSNumber)?.doubleValue }
+            if let v = num("temperature") { p.temperature = clamp(v) }
+            if let v = num("tint") { p.tint = clamp(v) }
+            if let v = num("exposure") { p.exposure = clamp(v) }
+            if let v = num("contrast") { p.contrast = clamp(v) }
+            if let v = num("saturation") { p.saturation = clamp(v) }
+            if let v = num("vibrance") { p.vibrance = clamp(v) }
+            if let v = num("highlights") { p.highlights = clamp(v) }
+            if let v = num("shadows") { p.shadows = clamp(v) }
+        }
+        editor.setColorPrimaries(p)
+        let out: [String: Any] = [
+            "temperature": p.temperature, "tint": p.tint, "exposure": p.exposure,
+            "contrast": p.contrast, "saturation": p.saturation, "vibrance": p.vibrance,
+            "highlights": p.highlights, "shadows": p.shadows,
+        ]
+        return .ok(Self.jsonString(out) ?? "{}")
+    }
+
+    /// `set_color_curve` — set one tone curve (master/red/green/blue).
+    func setColorCurve(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        guard let channel = args["channel"] as? String else { throw ToolError("Missing 'channel'") }
+        guard ["master", "red", "green", "blue"].contains(channel) else {
+            throw ToolError("channel must be master, red, green, or blue")
+        }
+        guard let rawPoints = args["points"] as? [Any] else { throw ToolError("Missing 'points' array") }
+
+        var points: [CurvePoint] = []
+        for entry in rawPoints {
+            guard let pair = entry as? [Any], pair.count == 2,
+                  let x = (pair[0] as? NSNumber)?.doubleValue,
+                  let y = (pair[1] as? NSNumber)?.doubleValue else {
+                throw ToolError("Each point must be an [x, y] pair of numbers in 0…1")
+            }
+            points.append(CurvePoint(x: min(1, max(0, x)), y: min(1, max(0, y))))
+        }
+        points.sort { $0.x < $1.x }
+
+        var p = editor.timeline.primaries ?? PrimaryGrade()
+        var curve = p.curve ?? GradeCurve()
+        let value = (points == GradeCurve.identityPoints) ? [] : points
+        switch channel {
+        case "master": curve.master = value
+        case "red": curve.red = value
+        case "green": curve.green = value
+        default: curve.blue = value
+        }
+        p.curve = curve.isIdentity ? nil : curve
+        editor.setColorPrimaries(p)
+        return .ok(Self.jsonString(["channel": channel, "points": points.map { [$0.x, $0.y] }]) ?? "{}")
+    }
 }
