@@ -304,16 +304,11 @@ enum CompositionBuilder {
         }
 
         guard !Task.isCancelled else { throw CancellationError() }
-        let sourceAsset = AVURLAsset(url: mediaURL)
-        do {
-            guard let sourceTrack = try await sourceAsset.loadTracks(withMediaType: mediaType).first else {
-                return .offline
-            }
-            return .loaded(asset: sourceAsset, track: sourceTrack)
-        } catch {
-            Log.preview.error("loadTracks failed — skipping clip. clipId=\(clip.id) mediaRef=\(clip.mediaRef): \(error.localizedDescription)")
+        guard let loaded = await SourceAssetCache.shared.assetAndTrack(url: mediaURL, mediaType: mediaType) else {
+            Log.preview.error("loadTracks failed — skipping clip. clipId=\(clip.id) mediaRef=\(clip.mediaRef)")
             return .offline
         }
+        return .loaded(asset: loaded.asset, track: loaded.track)
     }
 
     private static func insertClip(
