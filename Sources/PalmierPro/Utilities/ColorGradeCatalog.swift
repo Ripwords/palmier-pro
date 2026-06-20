@@ -111,30 +111,44 @@ enum ColorGradeCatalog {
 extension ColorGradeCatalog.Look: ColorGradeProcessor {
     func process(_ image: CIImage, colorSpace: CGColorSpace) -> CIImage {
         var result = image
-        for step in steps {
-            let filter = CIFilter(name: step.filter)
-            filter?.setValue(result, forKey: kCIInputImageKey)
-            for (key, value) in step.params {
-                switch key {
-                case "neutralX", "neutralY", "targetX", "targetY":
-                    // Temperature/tint take CIVectors.
-                    let isNeutral = key.hasPrefix("neutral")
-                    let vecKey = isNeutral ? "inputNeutral" : "inputTargetNeutral"
-                    let existing = filter?.value(forKey: vecKey) as? CIVector
-                    let x = key.hasSuffix("X") ? value : (existing?.x ?? 6500)
-                    let y = key.hasSuffix("Y") ? value : (existing?.y ?? 0)
-                    filter?.setValue(CIVector(x: x, y: y), forKey: vecKey)
-                default:
-                    filter?.setValue(value, forKey: "input" + key.prefix(1).uppercased() + key.dropFirst())
-                }
-            }
-            if let curve = step.curve, curve.count == 5 {
-                for (i, pt) in curve.enumerated() {
-                    filter?.setValue(CIVector(cgPoint: pt), forKey: "inputPoint\(i)")
-                }
-            }
-            if let out = filter?.outputImage { result = out }
+        for filter in ciFilters(intensity: 1.0) {
+            filter.setValue(result, forKey: kCIInputImageKey)
+            if let out = filter.outputImage { result = out }
         }
         return result
+    }
+
+    /// Configured filters (no input image) with each step interpolated toward
+    /// identity by `intensity` — used for the live `CALayer.filters` preview.
+    func ciFilters(intensity t: Double) -> [CIFilter] {
+        steps.compactMap { makeFilter($0, intensity: t) }
+    }
+
+    private func makeFilter(_ step: Step, intensity t: Double) -> CIFilter? {
+        guard let f = CIFilter(name: step.filter) else { return nil }
+        switch step.filter {
+        case "CITemperatureAndTint":
+            let nx = step.params["neutralX"] ?? 6500, ny = step.params["neutralY"] ?? 0
+            let tx = step.params["targetX"] ?? nx, ty = step.params["targetY"] ?? ny
+            f.setValue(CIVector(x: nx, y: ny), forKey: "inputNeutral")
+            f.setValue(CIVector(x: nx + (tx - nx) * t, y: ny + (ty - ny) * t), forKey: "inputTargetNeutral")
+        case "CIColorControls":
+            if let s = step.params["saturation"] { f.setValue(1 + (s - 1) * t, forKey: "inputSaturation") }
+            if let c = step.params["contrast"] { f.setValue(1 + (c - 1) * t, forKey: "inputContrast") }
+            if let b = step.params["brightness"] { f.setValue(b * t, forKey: "inputBrightness") }
+        case "CIVibrance":
+            if let a = step.params["amount"] { f.setValue(a * t, forKey: "inputAmount") }
+        default:
+            for (key, value) in step.params {
+                f.setValue(value, forKey: "input" + key.prefix(1).uppercased() + key.dropFirst())
+            }
+        }
+        if let curve = step.curve, curve.count == 5 {
+            for (i, pt) in curve.enumerated() {
+                let y = pt.x + (pt.y - pt.x) * CGFloat(t)   // lerp toward identity (y = x)
+                f.setValue(CIVector(x: pt.x, y: y), forKey: "inputPoint\(i)")
+            }
+        }
+        return f
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import CoreImage
 
 struct PreviewView: NSViewRepresentable {
     @Environment(EditorViewModel.self) var editor
@@ -35,11 +36,13 @@ struct PreviewView: NSViewRepresentable {
         context.coordinator.engine = engine
         editor.videoEngine = engine
         engine.activateTab(editor.activePreviewTab)
+        view.applyGrade(editor.timeline.lut)
         return view
     }
 
     func updateNSView(_ nsView: PreviewNSView, context: Context) {
         guard let engine = context.coordinator.engine else { return }
+        nsView.applyGrade(editor.timeline.lut)
         if editor.isPlaying && engine.player.timeControlStatus == .paused {
             engine.play()
         } else if !editor.isPlaying && engine.player.timeControlStatus != .paused {
@@ -71,6 +74,17 @@ final class PreviewNSView: NSView {
     var onCmdScroll: ((CGFloat, CGPoint, CGSize) -> Void)?
 
     private var lastVideoRect: CGRect = .zero
+    private var appliedGrade: LUTRef?
+
+    /// Live color grade via macOS `CALayer.filters` on the video layer (text stays ungraded).
+    func applyGrade(_ lut: LUTRef?) {
+        guard lut != appliedGrade else { return }
+        appliedGrade = lut
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer.filters = GradePreview.filters(for: lut)
+        CATransaction.commit()
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)

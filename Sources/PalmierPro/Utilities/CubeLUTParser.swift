@@ -35,6 +35,29 @@ struct CubeLUT: Equatable, Sendable {
     var hasNonDefaultDomain: Bool {
         domainMin != SIMD3(0, 0, 0) || domainMax != SIMD3(1, 1, 1)
     }
+
+    /// Lerp the table toward the identity cube by `t` (1 = full LUT, 0 = no-op).
+    func intensityBlended(_ t: Double) -> CubeLUT {
+        guard t < 1 else { return self }
+        let n = dimension, f = Float(t)
+        var out = rgbaTable
+        var idx = 0
+        for b in 0..<n {
+            for g in 0..<n {
+                for r in 0..<n {
+                    let ir = Float(r) / Float(n - 1)
+                    let ig = Float(g) / Float(n - 1)
+                    let ib = Float(b) / Float(n - 1)
+                    out[idx]     = ir + (rgbaTable[idx]     - ir) * f
+                    out[idx + 1] = ig + (rgbaTable[idx + 1] - ig) * f
+                    out[idx + 2] = ib + (rgbaTable[idx + 2] - ib) * f
+                    out[idx + 3] = 1
+                    idx += 4
+                }
+            }
+        }
+        return CubeLUT(dimension: n, rgbaTable: out, domainMin: SIMD3(0, 0, 0), domainMax: SIMD3(1, 1, 1))
+    }
 }
 
 enum CubeLUTParser {
