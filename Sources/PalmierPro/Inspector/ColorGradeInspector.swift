@@ -8,6 +8,9 @@ struct ColorGradeInspector: View {
 
     private var grade: LUTRef? { editor.timeline.lut }
 
+    private let sliderWidth: CGFloat = 90
+    private let valueWidth: CGFloat = 32
+
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             InspectorRow(icon: "camera.filters", label: "Look") {
@@ -29,12 +32,12 @@ struct ColorGradeInspector: View {
                         Slider(value: intensityBinding, in: 0...1)
                             .controlSize(.mini)
                             .tint(AppTheme.Accent.primary)
-                            .frame(width: 90)
+                            .frame(width: sliderWidth)
                         Text("\(Int((grade?.clampedIntensity ?? 1) * 100))%")
                             .font(.system(size: AppTheme.FontSize.xs))
                             .foregroundStyle(AppTheme.Text.tertiaryColor)
                             .monospacedDigit()
-                            .frame(width: 32, alignment: .trailing)
+                            .frame(width: valueWidth, alignment: .trailing)
                     }
                 }
             }
@@ -113,12 +116,12 @@ struct ColorGradeInspector: View {
                 Slider(value: primaryBinding(kp), in: -100...100)
                     .controlSize(.mini)
                     .tint(AppTheme.Accent.primary)
-                    .frame(width: 90)
+                    .frame(width: sliderWidth)
                 Text("\(Int(editor.timeline.primaries?[keyPath: kp] ?? 0))")
                     .font(.system(size: AppTheme.FontSize.xs))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
                     .monospacedDigit()
-                    .frame(width: 32, alignment: .trailing)
+                    .frame(width: valueWidth, alignment: .trailing)
             }
         }
     }

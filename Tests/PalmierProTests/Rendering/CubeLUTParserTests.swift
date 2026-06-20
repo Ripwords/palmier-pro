@@ -4,7 +4,7 @@ import Testing
 @Suite("Cube LUT parsing")
 struct CubeLUTParserTests {
 
-    /// A 2×2×2 identity cube: each corner maps to itself (red varies fastest).
+    // 2×2×2 identity cube; red varies fastest.
     static let identity2 = """
     # sample identity LUT
     TITLE "identity"
@@ -63,7 +63,6 @@ struct CubeLUTParserTests {
     }
 
     @Test func wrongRowCountThrows() {
-        // Declares 2 but only supplies 3 rows.
         #expect(throws: CubeLUTParser.ParseError.wrongRowCount(expected: 8, got: 3)) {
             try CubeLUTParser.parse("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0")
         }

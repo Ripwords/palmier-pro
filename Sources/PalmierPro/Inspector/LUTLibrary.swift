@@ -8,9 +8,7 @@ struct LUTEntry: Identifiable, Hashable {
     let url: URL
 }
 
-/// A user-chosen folder of `.cube` LUTs, scanned in place and remembered across
-/// launches. No path is hardcoded — the picker only *defaults* to a common
-/// location as a convenience.
+/// A user-chosen folder of `.cube` LUTs, scanned in place and remembered across launches.
 @MainActor
 @Observable
 final class LUTLibrary {
@@ -42,7 +40,7 @@ final class LUTLibrary {
         groups = []
     }
 
-    /// Common starting point for the folder picker — offered only if it exists.
+    /// Picker default — offered only if it exists on disk.
     static var suggestedFolder: URL? {
         let candidates = [
             URL(fileURLWithPath: "/Library/Application Support/Blackmagic Design/DaVinci Resolve/LUT"),

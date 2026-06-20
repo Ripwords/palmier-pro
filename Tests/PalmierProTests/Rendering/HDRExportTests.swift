@@ -5,8 +5,6 @@ import AVFoundation
 @Suite("HDR export")
 struct HDRExportTests {
 
-    /// End-to-end HDR encode from a real source clip. Gated on HDR_SRC so CI skips.
-    /// Verify the output's color/bit-depth externally with ffprobe.
     @Test func encodesTenBitHDRFromSource() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let src = env["HDR_SRC"], FileManager.default.fileExists(atPath: src) else { return }

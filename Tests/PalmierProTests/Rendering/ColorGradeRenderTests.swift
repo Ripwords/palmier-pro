@@ -6,13 +6,11 @@ import Foundation
 @Suite("Color grade rendering")
 struct ColorGradeRenderTests {
 
-    /// Renders every built-in look over a real fixture image, writes the results
-    /// for visual inspection, and asserts the grades move color sensibly.
-    /// Gated on GRADE_FIXTURE so CI without a fixture simply skips.
     @Test func gradesFixtureAndShiftsColor() throws {
         let env = ProcessInfo.processInfo.environment
         guard let inPath = env["GRADE_FIXTURE"], FileManager.default.fileExists(atPath: inPath) else {
-            return // no fixture provided — skip
+            return
+
         }
         let outDir = env["GRADE_OUTDIR"] ?? NSTemporaryDirectory()
         let ctx = CIContext(options: nil)
@@ -44,8 +42,7 @@ struct ColorGradeRenderTests {
             #expect(delta > 0.003, "look \(look.id) barely changed the image")
         }
 
-        // Directional sanity: the warm look should read warmer (higher R−B) than
-        // the cool/moody look on the same frame.
+        // Warm look should read warmer (higher R−B) than the cool look on the same frame.
         let warm = avg(ColorGradeCatalog.look(id: "warm-cinematic")!.process(src, colorSpace: working))
         let cool = avg(ColorGradeCatalog.look(id: "moody-forest")!.process(src, colorSpace: working))
         #expect((warm.r - warm.b) > (cool.r - cool.b),
@@ -55,8 +52,8 @@ struct ColorGradeRenderTests {
         if let cubePath = env["GRADE_CUBE"], FileManager.default.fileExists(atPath: cubePath) {
             let text = try String(contentsOf: URL(fileURLWithPath: cubePath), encoding: .utf8)
             let parsed = try CubeLUTParser.parse(text)
-            let ref = LUTRef.cube(parsed, name: "test")   // embeds as base64
-            let processor = try #require(ref.makeProcessor())  // reconstructs from base64
+            let ref = LUTRef.cube(parsed, name: "test")
+            let processor = try #require(ref.makeProcessor())
             let graded = processor.process(src, colorSpace: working).cropped(to: src.extent)
             if let png = ctx.pngRepresentation(of: graded, format: .RGBA8, colorSpace: srgb) {
                 try png.write(to: URL(fileURLWithPath: "\(outDir)/grade-cube.png"))
@@ -65,7 +62,6 @@ struct ColorGradeRenderTests {
             #expect((a.r - a.b) > (base.r - base.b), "warm test .cube should warm the image")
         }
 
-        // Primary grade engine: warm + contrast + saturation + lifted shadows.
         var primaries = PrimaryGrade()
         primaries.temperature = 40
         primaries.contrast = 30
@@ -80,7 +76,6 @@ struct ColorGradeRenderTests {
         let pa = avg(pGraded)
         #expect((pa.r - pa.b) > (base.r - base.b), "warm primaries should warm the image")
 
-        // Curve engine: lift midtones via a master curve.
         var curveGrade = PrimaryGrade()
         curveGrade.curve = GradeCurve(master: [.init(x: 0, y: 0), .init(x: 0.5, y: 0.62), .init(x: 1, y: 1)])
         let cFilters = GradePipeline.filters(primaries: curveGrade, lut: nil)

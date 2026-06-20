@@ -1,12 +1,10 @@
 import Foundation
 
 extension ToolExecutor {
-    /// `list_color_grades` — the built-in look catalog.
     func listColorGrades() -> ToolResult {
         .ok(Self.jsonString(["looks": ColorGradeCatalog.catalogJSON]) ?? "{}")
     }
 
-    /// `apply_color_grade` — set a project-wide grade (built-in look or a .cube file path).
     func applyColorGrade(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let look = (args["look"] as? String)?.trimmingCharacters(in: .whitespaces)
         let lutPath = (args["lutPath"] as? String)?.trimmingCharacters(in: .whitespaces)
@@ -43,13 +41,11 @@ extension ToolExecutor {
         return .ok(Self.jsonString(out) ?? "{}")
     }
 
-    /// `clear_color_grade` — remove the project grade.
     func clearColorGrade(_ editor: EditorViewModel) throws -> ToolResult {
         editor.setColorGrade(nil)
         return .ok(Self.jsonString(["cleared": true]) ?? "{}")
     }
 
-    /// `adjust_color` — set project-wide primary corrections (partial updates).
     func adjustColor(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         var p = editor.timeline.primaries ?? PrimaryGrade()
         let reset = (args["reset"] as? Bool) == true || (args["reset"] as? NSNumber)?.boolValue == true
@@ -78,7 +74,6 @@ extension ToolExecutor {
         return .ok(Self.jsonString(out) ?? "{}")
     }
 
-    /// `set_color_curve` — set one tone curve (master/red/green/blue).
     func setColorCurve(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         guard let channel = args["channel"] as? String else { throw ToolError("Missing 'channel'") }
         guard ["master", "red", "green", "blue"].contains(channel) else {

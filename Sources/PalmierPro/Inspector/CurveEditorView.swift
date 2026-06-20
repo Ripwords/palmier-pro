@@ -1,5 +1,11 @@
 import SwiftUI
 
+private let curveHeight: CGFloat = 150
+private let pointDiameter: CGFloat = 9
+private let histogramRed = Color(red: 1, green: 0.22, blue: 0.22)
+private let histogramGreen = Color(red: 0.25, green: 0.9, blue: 0.35)
+private let histogramBlue = Color(red: 0.3, green: 0.5, blue: 1)
+
 struct CurveEditorView: View {
     @Environment(EditorViewModel.self) var editor
     @State private var channel: Channel = .master
@@ -20,8 +26,6 @@ struct CurveEditorView: View {
         }
     }
 
-    private let height: CGFloat = 150
-
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
             Picker("", selection: $channel) {
@@ -31,25 +35,23 @@ struct CurveEditorView: View {
             .labelsHidden()
 
             GeometryReader { geo in
-                let size = CGSize(width: geo.size.width, height: height)
+                let size = CGSize(width: geo.size.width, height: curveHeight)
                 ZStack {
                     Canvas { ctx, _ in
-                        // RGB parade backdrop — additive so overlaps read as combined color.
+                        // Additive blend so overlapping channels read as combined color.
                         if histR.count > 1 {
                             ctx.blendMode = .plusLighter
-                            ctx.fill(histogramPath(histR, size), with: .color(Color(red: 1, green: 0.22, blue: 0.22).opacity(0.55)))
-                            ctx.fill(histogramPath(histG, size), with: .color(Color(red: 0.25, green: 0.9, blue: 0.35).opacity(0.55)))
-                            ctx.fill(histogramPath(histB, size), with: .color(Color(red: 0.3, green: 0.5, blue: 1).opacity(0.55)))
+                            ctx.fill(histogramPath(histR, size), with: .color(histogramRed.opacity(AppTheme.Opacity.strong)))
+                            ctx.fill(histogramPath(histG, size), with: .color(histogramGreen.opacity(AppTheme.Opacity.strong)))
+                            ctx.fill(histogramPath(histB, size), with: .color(histogramBlue.opacity(AppTheme.Opacity.strong)))
                             ctx.blendMode = .normal
                         }
-                        // Frame + diagonal reference.
                         let border = Path(CGRect(origin: .zero, size: size))
                         ctx.stroke(border, with: .color(AppTheme.Border.subtleColor), lineWidth: AppTheme.BorderWidth.hairline)
                         var diag = Path()
                         diag.move(to: point(CurvePoint(x: 0, y: 0), size))
                         diag.addLine(to: point(CurvePoint(x: 1, y: 1), size))
                         ctx.stroke(diag, with: .color(AppTheme.Border.subtleColor), style: .init(lineWidth: AppTheme.BorderWidth.hairline, dash: [3, 3]))
-                        // Curve.
                         var curve = Path()
                         let pts = sortedPoints
                         for i in stride(from: 0.0, through: 1.0, by: 0.02) {
@@ -64,7 +66,7 @@ struct CurveEditorView: View {
                     ForEach(Array(sortedPoints.enumerated()), id: \.offset) { index, pt in
                         Circle()
                             .fill(channel.tint)
-                            .frame(width: 9, height: 9)
+                            .frame(width: pointDiameter, height: pointDiameter)
                             .position(point(pt, size))
                             .gesture(
                                 DragGesture(minimumDistance: 0)
@@ -74,7 +76,7 @@ struct CurveEditorView: View {
                     }
                 }
             }
-            .frame(height: height)
+            .frame(height: curveHeight)
 
             Text("Click to add a point · drag to shape · double-click to remove")
                 .font(.system(size: AppTheme.FontSize.xxs))

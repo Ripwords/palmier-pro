@@ -102,7 +102,6 @@ enum ColorGradeCatalog {
 
     static func look(id: String) -> Look? { all.first { $0.id == id } }
 
-    /// Catalog as JSON-ready dictionaries for `list_color_grades`.
     static var catalogJSON: [[String: Any]] {
         all.map { ["id": $0.id, "name": $0.name, "summary": $0.summary] }
     }

@@ -1,7 +1,6 @@
 import Foundation
 
 extension EditorViewModel {
-    /// Set or clear the project-wide color grade (undoable).
     func setColorGrade(_ lut: LUTRef?) {
         let prev = timeline.lut
         guard prev != lut else { return }
@@ -10,12 +9,10 @@ extension EditorViewModel {
             vm.setColorGrade(prev)
         }
         undoManager?.setActionName(lut == nil ? "Clear Color Grade (Agent)" : "Apply Color Grade (Agent)")
-        // No composition rebuild: the grade renders via CALayer.filters, not the
-        // composition. Rebuilding would only cause a black flash.
+        // Grade renders via CALayer.filters, not the composition; rebuilding would only cause a black flash.
         videoEngine?.refreshGrade()
     }
 
-    /// Set or clear the project-wide primary correction (undoable).
     func setColorPrimaries(_ primaries: PrimaryGrade?) {
         let next = (primaries?.isIdentity ?? true) ? nil : primaries
         let prev = timeline.primaries
