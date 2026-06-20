@@ -61,13 +61,18 @@ enum ToolDefinitions {
                     "look": ["type": "string", "description": "Built-in look id from list_color_grades (e.g. 'warm-cinematic', 'teal-orange', 'moody-forest', 'vibrant-travel', 'vintage-film', 'clean-neutral'). Provide either look or lutPath."],
                     "lutPath": ["type": "string", "description": "Filesystem path to a .cube LUT file (Adobe/Resolve 3D LUT). Parsed and embedded into the project. Use instead of look for a custom film LUT."],
                     "intensity": ["type": "number", "description": "Grade strength 0–1 (default 1.0). Lower values blend toward the ungraded original."],
+                    "clipId": ["type": "string", "description": "Optional. Apply this look/LUT to a single clip's grade instead of the project-wide timeline grade. Omit for the whole timeline."],
                 ]
             )
         ),
         AgentTool(
             name: .clearColorGrade,
-            description: "Remove the project-wide color grade set by apply_color_grade. The next export is ungraded. No-op if none is set.",
-            inputSchema: objectSchema()
+            description: "Remove a color grade set by apply_color_grade. Clears the project-wide timeline grade, or a single clip's grade when clipId is given. No-op if none is set.",
+            inputSchema: objectSchema(
+                properties: [
+                    "clipId": ["type": "string", "description": "Optional. Clear this clip's grade instead of the project-wide timeline grade."],
+                ]
+            )
         ),
         AgentTool(
             name: .adjustColor,
@@ -83,6 +88,7 @@ enum ToolDefinitions {
                     "highlights": ["type": "number", "description": "−100 (recover/darken) … 100 (brighten)."],
                     "shadows": ["type": "number", "description": "−100 (crush) … 100 (lift)."],
                     "reset": ["type": "boolean", "description": "Zero all eight primary controls (keeps curves). Ignores other fields."],
+                    "clipId": ["type": "string", "description": "Optional. Adjust a single clip's primary correction instead of the project-wide timeline grade. Omit for the whole timeline."],
                 ]
             )
         ),
@@ -93,6 +99,7 @@ enum ToolDefinitions {
                 properties: [
                     "channel": ["type": "string", "enum": ["master", "red", "green", "blue"], "description": "Which curve to set."],
                     "points": ["type": "array", "items": ["type": "array", "items": ["type": "number"]], "description": "[x, y] pairs in 0…1, e.g. [[0,0],[0.5,0.62],[1,1]]. Empty array resets the channel to linear."],
+                    "clipId": ["type": "string", "description": "Optional. Set the curve on a single clip's grade instead of the project-wide timeline grade. Omit for the whole timeline."],
                 ],
                 required: ["channel", "points"]
             )

@@ -5,6 +5,17 @@ extension ToolExecutor {
         .ok(Self.jsonString(["looks": ColorGradeCatalog.catalogJSON]) ?? "{}")
     }
 
+    /// Validates an optional `clipId`. Returns nil for the timeline scope, or throws if the id is unknown.
+    private func resolveColorTarget(_ args: [String: Any], _ editor: EditorViewModel) throws -> String? {
+        guard let id = (args["clipId"] as? String)?.trimmingCharacters(in: .whitespaces), !id.isEmpty else {
+            return nil
+        }
+        guard editor.clipFor(id: id) != nil else {
+            throw ToolError("clipId not found: \(id)")
+        }
+        return id
+    }
+
     func applyColorGrade(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let look = (args["look"] as? String)?.trimmingCharacters(in: .whitespaces)
         let lutPath = (args["lutPath"] as? String)?.trimmingCharacters(in: .whitespaces)
@@ -35,19 +46,28 @@ extension ToolExecutor {
             throw ToolError("Provide exactly one of 'look' or 'lutPath'.")
         }
 
-        editor.setColorGrade(ref)
+        if let clipId = try resolveColorTarget(args, editor) {
+            editor.setClipLUT(clipId: clipId, ref)
+        } else {
+            editor.setColorGrade(ref)
+        }
         var out = ref.summary
         out["appliesAt"] = "export"
         return .ok(Self.jsonString(out) ?? "{}")
     }
 
-    func clearColorGrade(_ editor: EditorViewModel) throws -> ToolResult {
-        editor.setColorGrade(nil)
+    func clearColorGrade(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
+        if let clipId = try resolveColorTarget(args, editor) {
+            editor.setClipLUT(clipId: clipId, nil)
+        } else {
+            editor.setColorGrade(nil)
+        }
         return .ok(Self.jsonString(["cleared": true]) ?? "{}")
     }
 
     func adjustColor(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
-        var p = editor.timeline.primaries ?? PrimaryGrade()
+        let clipId = try resolveColorTarget(args, editor)
+        var p = (clipId.flatMap { editor.clipFor(id: $0)?.grade?.primaries } ?? editor.timeline.primaries) ?? PrimaryGrade()
         let reset = (args["reset"] as? Bool) == true || (args["reset"] as? NSNumber)?.boolValue == true
         if reset {
             let curve = p.curve
@@ -65,7 +85,11 @@ extension ToolExecutor {
             if let v = num("highlights") { p.highlights = clamp(v) }
             if let v = num("shadows") { p.shadows = clamp(v) }
         }
-        editor.setColorPrimaries(p)
+        if let clipId {
+            editor.setClipPrimaries(clipId: clipId, p)
+        } else {
+            editor.setColorPrimaries(p)
+        }
         let out: [String: Any] = [
             "temperature": p.temperature, "tint": p.tint, "exposure": p.exposure,
             "contrast": p.contrast, "saturation": p.saturation, "vibrance": p.vibrance,
@@ -92,7 +116,8 @@ extension ToolExecutor {
         }
         points.sort { $0.x < $1.x }
 
-        var p = editor.timeline.primaries ?? PrimaryGrade()
+        let clipId = try resolveColorTarget(args, editor)
+        var p = (clipId.flatMap { editor.clipFor(id: $0)?.grade?.primaries } ?? editor.timeline.primaries) ?? PrimaryGrade()
         var curve = p.curve ?? GradeCurve()
         let value = (points == GradeCurve.identityPoints) ? [] : points
         switch channel {
@@ -102,7 +127,11 @@ extension ToolExecutor {
         default: curve.blue = value
         }
         p.curve = curve.isIdentity ? nil : curve
-        editor.setColorPrimaries(p)
+        if let clipId {
+            editor.setClipPrimaries(clipId: clipId, p)
+        } else {
+            editor.setColorPrimaries(p)
+        }
         return .ok(Self.jsonString(["channel": channel, "points": points.map { [$0.x, $0.y] }]) ?? "{}")
     }
 }
