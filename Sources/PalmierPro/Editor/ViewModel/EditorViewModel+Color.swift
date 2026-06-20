@@ -1,8 +1,7 @@
 import Foundation
 
 extension EditorViewModel {
-    /// Set or clear the project-wide color grade. Undoable, mirrors the other
-    /// project-level setting mutations.
+    /// Set or clear the project-wide color grade (undoable).
     func setColorGrade(_ lut: LUTRef?) {
         let prev = timeline.lut
         guard prev != lut else { return }

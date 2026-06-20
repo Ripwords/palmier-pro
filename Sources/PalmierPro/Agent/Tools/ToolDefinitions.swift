@@ -52,11 +52,11 @@ enum ToolDefinitions {
         ),
         AgentTool(
             name: .applyColorGrade,
-            description: "Apply a project-wide color grade (one look over the whole timeline), realized as a final color pass at export. Use a built-in look by id (see list_color_grades) — the zero-setup path for 'color grade this' / 'make it cinematic' — or a custom imported .cube LUT via lutMediaRef. Pick the look to match the footage (e.g. 'moody-forest' for jungle/hike, 'vibrant-travel' for bright social vlogs). intensity (0–1, default 1) blends the grade with the original; 0.6–0.8 reads as a tasteful default. Calling again replaces the current grade. Note: the grade shows in the exported file; live-preview grading is a separate upcoming feature.",
+            description: "Apply a project-wide color grade (one look over the whole timeline), realized as a final color pass at export. Use a built-in look by id (see list_color_grades) — the zero-setup path for 'color grade this' / 'make it cinematic' — or a custom .cube LUT by file path via lutPath (the .cube is parsed and embedded in the project). Pick the look to match the footage (e.g. 'moody-forest' for jungle/hike, 'vibrant-travel' for bright social vlogs). intensity (0–1, default 1) blends the grade with the original; 0.6–0.8 reads as a tasteful default. Calling again replaces the current grade. Note: the grade shows in the exported file; live-preview grading is a separate upcoming feature.",
             inputSchema: objectSchema(
                 properties: [
-                    "look": ["type": "string", "description": "Built-in look id from list_color_grades (e.g. 'warm-cinematic', 'teal-orange', 'moody-forest', 'vibrant-travel', 'vintage-film', 'clean-neutral'). Provide either look or lutMediaRef."],
-                    "lutMediaRef": ["type": "string", "description": "Asset ID of an imported .cube LUT from get_media. Use instead of look for a custom LUT. Import the .cube first."],
+                    "look": ["type": "string", "description": "Built-in look id from list_color_grades (e.g. 'warm-cinematic', 'teal-orange', 'moody-forest', 'vibrant-travel', 'vintage-film', 'clean-neutral'). Provide either look or lutPath."],
+                    "lutPath": ["type": "string", "description": "Filesystem path to a .cube LUT file (Adobe/Resolve 3D LUT). Parsed and embedded into the project. Use instead of look for a custom film LUT."],
                     "intensity": ["type": "number", "description": "Grade strength 0–1 (default 1.0). Lower values blend toward the ungraded original."],
                 ]
             )

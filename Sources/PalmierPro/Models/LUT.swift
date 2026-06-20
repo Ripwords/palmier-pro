@@ -1,33 +1,53 @@
 import CoreImage
 import Foundation
 
-/// Anything that can grade a frame: an imported `.cube` LUT or a built-in look.
-/// Both flow through the same export pass so the agent can apply either by name.
 protocol ColorGradeProcessor: Sendable {
-    /// Return the graded image for `image` (assumed in the working color space).
     func process(_ image: CIImage, colorSpace: CGColorSpace) -> CIImage
 }
 
-/// A project-level color grade.
-///
-/// Phase 1 (global grade): one look applied to the whole timeline as a final Core
-/// Image pass at export time. The source is either an imported `.cube` asset or a
-/// curated built-in look (see `ColorGradeCatalog`). `intensity` blends the graded
-/// result against the ungraded original (0 = bypass, 1 = full strength).
-///
-/// Per-clip grading is intentionally out of scope here — it needs a custom
-/// `AVVideoCompositing` and is tracked as a separate proposal.
+/// Project color grade: a built-in look or an inline-embedded `.cube` (RGBA float32
+/// base64). Embedded so the grade is portable with the project; `get_timeline` drops
+/// `cubeBase64` so the blob never reaches agent context.
 struct LUTRef: Codable, Sendable, Equatable {
-    enum Source: Codable, Sendable, Equatable {
-        /// An imported `.cube` file in the media library.
-        case cube(mediaRef: String)
-        /// A built-in look identified by `ColorGradeCatalog` id.
-        case look(id: String)
-    }
+    enum Kind: String, Codable, Sendable { case look, cube }
 
-    var source: Source
+    var kind: Kind
+    var lookID: String?
+    var cubeName: String?
+    var cubeDimension: Int?
+    var cubeBase64: String?
     var intensity: Double = 1.0
 
-    /// Clamp to the meaningful range; values outside [0, 1] are user/JSON noise.
     var clampedIntensity: Double { min(1.0, max(0.0, intensity)) }
+
+    static func look(_ id: String, intensity: Double = 1.0) -> LUTRef {
+        LUTRef(kind: .look, lookID: id, intensity: intensity)
+    }
+
+    static func cube(_ lut: CubeLUT, name: String, intensity: Double = 1.0) -> LUTRef {
+        LUTRef(kind: .cube, cubeName: name, cubeDimension: lut.dimension,
+               cubeBase64: lut.base64, intensity: intensity)
+    }
+
+    func makeProcessor() -> ColorGradeProcessor? {
+        switch kind {
+        case .look:
+            return lookID.flatMap { ColorGradeCatalog.look(id: $0) }
+        case .cube:
+            guard let dim = cubeDimension, let b64 = cubeBase64 else { return nil }
+            return CubeLUT(base64: b64, dimension: dim)
+        }
+    }
+
+    /// Compact form for `get_timeline` — never includes the cube blob.
+    var summary: [String: Any] {
+        var out: [String: Any] = ["kind": kind.rawValue, "intensity": clampedIntensity]
+        switch kind {
+        case .look: if let lookID { out["look"] = lookID }
+        case .cube:
+            if let cubeName { out["cube"] = cubeName }
+            if let cubeDimension { out["dimension"] = cubeDimension }
+        }
+        return out
+    }
 }

@@ -6,37 +6,40 @@ extension ToolExecutor {
         .ok(Self.jsonString(["looks": ColorGradeCatalog.catalogJSON]) ?? "{}")
     }
 
-    /// `apply_color_grade` — set a project-wide grade (built-in look or imported .cube).
+    /// `apply_color_grade` — set a project-wide grade (built-in look or a .cube file path).
     func applyColorGrade(_ editor: EditorViewModel, _ args: [String: Any]) throws -> ToolResult {
         let look = (args["look"] as? String)?.trimmingCharacters(in: .whitespaces)
-        let lutMediaRef = (args["lutMediaRef"] as? String)?.trimmingCharacters(in: .whitespaces)
+        let lutPath = (args["lutPath"] as? String)?.trimmingCharacters(in: .whitespaces)
         let intensityRaw = (args["intensity"] as? NSNumber)?.doubleValue ?? 1.0
         let intensity = min(1.0, max(0.0, intensityRaw))
 
-        let source: LUTRef.Source
-        switch (look?.isEmpty == false ? look : nil, lutMediaRef?.isEmpty == false ? lutMediaRef : nil) {
+        let ref: LUTRef
+        switch (look?.isEmpty == false ? look : nil, lutPath?.isEmpty == false ? lutPath : nil) {
         case let (lookID?, nil):
             guard ColorGradeCatalog.look(id: lookID) != nil else {
                 let ids = ColorGradeCatalog.all.map(\.id).joined(separator: ", ")
                 throw ToolError("Unknown look '\(lookID)'. Available: \(ids). Call list_color_grades.")
             }
-            source = .look(id: lookID)
-        case let (nil, mediaRef?):
-            guard editor.mediaAssets.contains(where: { $0.id == mediaRef }) else {
-                throw ToolError("LUT media not found: \(mediaRef). Import the .cube file first.")
+            ref = .look(lookID, intensity: intensity)
+        case let (nil, path?):
+            let url = URL(fileURLWithPath: path)
+            guard url.pathExtension.lowercased() == "cube" else {
+                throw ToolError("lutPath must point at a .cube file (got '\(url.lastPathComponent)').")
             }
-            source = .cube(mediaRef: mediaRef)
+            guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+                throw ToolError("Could not read .cube file at \(path)")
+            }
+            let cube: CubeLUT
+            do { cube = try CubeLUTParser.parse(text) }
+            catch { throw ToolError("Invalid .cube: \(error.localizedDescription)") }
+            ref = .cube(cube, name: url.deletingPathExtension().lastPathComponent, intensity: intensity)
         default:
-            throw ToolError("Provide exactly one of 'look' or 'lutMediaRef'.")
+            throw ToolError("Provide exactly one of 'look' or 'lutPath'.")
         }
 
-        editor.setColorGrade(LUTRef(source: source, intensity: intensity))
-
-        var out: [String: Any] = ["intensity": intensity, "appliesAt": "export"]
-        switch source {
-        case .look(let id): out["look"] = id
-        case .cube(let mediaRef): out["lutMediaRef"] = mediaRef
-        }
+        editor.setColorGrade(ref)
+        var out = ref.summary
+        out["appliesAt"] = "export"
         return .ok(Self.jsonString(out) ?? "{}")
     }
 

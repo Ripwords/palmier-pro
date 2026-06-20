@@ -3,11 +3,13 @@ import AppKit
 
 enum ExportFormat {
     case h264, h265, prores, xml
+    /// HEVC Main10, BT.2020 + HLG — preserves 10-bit HDR (via AVAssetWriter).
+    case hevcHDR
 
     var fileExtension: String {
         switch self {
         case .h264, .h265: "mp4"
-        case .prores: "mov"
+        case .prores, .hevcHDR: "mov"
         case .xml: "xml"
         }
     }
@@ -15,10 +17,12 @@ enum ExportFormat {
     var utType: AVFileType? {
         switch self {
         case .h264, .h265: .mp4
-        case .prores: .mov
+        case .prores, .hevcHDR: .mov
         case .xml: nil
         }
     }
+
+    var isHDR: Bool { self == .hevcHDR }
 }
 
 enum ExportResolution: String, CaseIterable, Identifiable {
@@ -82,6 +86,10 @@ final class ExportService {
             progress = 1.0
             return
         }
+        if format.isHDR {
+            await exportHDR(timeline: timeline, resolver: resolver, resolution: resolution, outputURL: outputURL)
+            return
+        }
 
         isExporting = true
         progress = 0
@@ -110,9 +118,8 @@ final class ExportService {
                 Log.export.notice("export start format=\(String(describing: format)) resolution=\(resolution.rawValue) url=\(outputURL.lastPathComponent)")
                 try await session.export(to: outputURL, as: fileType)
                 try await applyLUTPassIfNeeded(
-                    timeline: timeline, resolver: resolver,
-                    format: format, resolution: resolution,
-                    fileType: fileType, outputURL: outputURL
+                    timeline: timeline, format: format,
+                    resolution: resolution, fileType: fileType, outputURL: outputURL
                 )
                 progress = 1.0
                 Log.export.notice("export ok")
@@ -168,28 +175,17 @@ final class ExportService {
         }
     }
 
-    /// If the timeline carries a project LUT, grade the just-exported file in place.
-    /// No-op when there's no LUT, the `.cube` is missing, or intensity is 0.
+    /// Grade the just-exported file in place when the timeline carries a LUT.
     private func applyLUTPassIfNeeded(
         timeline: Timeline,
-        resolver: MediaResolver,
         format: ExportFormat,
         resolution: ExportResolution,
         fileType: AVFileType,
         outputURL: URL
     ) async throws {
-        guard let lutRef = timeline.lut, lutRef.clampedIntensity > 0 else { return }
+        guard let lutRef = timeline.lut, lutRef.clampedIntensity > 0,
+              let processor = lutRef.makeProcessor() else { return }
         do {
-            let processor: ColorGradeProcessor
-            switch lutRef.source {
-            case .cube(let mediaRef):
-                guard let cubeURL = resolver.resolveURL(for: mediaRef) else { return }
-                let text = try String(contentsOf: cubeURL, encoding: .utf8)
-                processor = try CubeLUTParser.parse(text)
-            case .look(let id):
-                guard let look = ColorGradeCatalog.look(id: id) else { return }
-                processor = look
-            }
             let gradedURL = try await LUTExportPass.apply(
                 processor: processor, intensity: lutRef.clampedIntensity,
                 to: outputURL, fileType: fileType,
@@ -201,6 +197,42 @@ final class ExportService {
         } catch {
             // Don't fail the whole export over a bad LUT — keep the ungraded file.
             Log.export.error("lut-pass skipped: \(Log.detail(error))")
+        }
+    }
+
+    /// Build the composition, then encode HEVC Main10 HDR (no text/LUT on this path yet).
+    private func exportHDR(
+        timeline: Timeline,
+        resolver: MediaResolver,
+        resolution: ExportResolution,
+        outputURL: URL
+    ) async {
+        isExporting = true
+        progress = 0
+        error = nil
+        defer { isExporting = false }
+        do {
+            let renderSize = resolution.renderSize(for: CGSize(width: timeline.width, height: timeline.height))
+            let result = try await CompositionBuilder.build(
+                timeline: timeline,
+                resolveURL: { resolver.resolveURL(for: $0) },
+                renderSize: renderSize
+            )
+            try? FileManager.default.removeItem(at: outputURL)
+            Log.export.notice("hdr export start size=\(Int(renderSize.width))x\(Int(renderSize.height)) url=\(outputURL.lastPathComponent)")
+            let inputs = HDRVideoExporter.Inputs(
+                composition: result.composition,
+                videoComposition: result.videoComposition,
+                audioMix: result.audioMix
+            )
+            try await HDRVideoExporter.export(
+                inputs, renderSize: renderSize, fps: timeline.fps, transfer: .hlg, to: outputURL
+            )
+            progress = 1.0
+            Log.export.notice("hdr export ok")
+        } catch {
+            self.error = Log.detail(error)
+            Log.export.error("hdr export failed: \(Log.detail(error))")
         }
     }
 
@@ -258,8 +290,8 @@ final class ExportService {
             }
         case .prores:
             AVAssetExportPresetAppleProRes422LPCM
-        case .xml:
-            AVAssetExportPresetPassthrough // unreachable — XML returns early
+        case .xml, .hevcHDR:
+            AVAssetExportPresetPassthrough // unreachable — XML and HDR return early
         }
     }
 }

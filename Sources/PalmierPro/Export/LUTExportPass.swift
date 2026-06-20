@@ -1,14 +1,8 @@
 import AVFoundation
 import CoreImage
 
-/// Applies a project LUT to an already-rendered video file as a second pass.
-///
-/// Design: the main compositor (`CompositionBuilder`) stays a pure
-/// `AVVideoCompositionLayerInstruction` pipeline — which has no color hook — so we
-/// grade the *flattened* output instead via `AVVideoComposition(asset:applyingCIFiltersWithHandler:)`.
-/// One extra encode; lossless-ish for ProRes, a small hit for HEVC presets.
+/// Grades the flattened export via `applyingCIFiltersWithHandler` (the compositor has no color hook).
 enum LUTExportPass {
-    /// Grades `inputURL` and returns a new file URL. Caller owns both files.
     static func apply(
         processor: ColorGradeProcessor,
         intensity: Double,

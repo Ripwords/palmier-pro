@@ -1,21 +1,35 @@
 import CoreImage
 import Foundation
 
-/// A parsed 3D color lookup table from an Adobe/Resolve `.cube` file.
-///
-/// `rgbaTable` holds `dimension³` RGBA entries (alpha forced to 1), in the file's
-/// native ordering — red varies fastest — which is exactly what
-/// `CIColorCubeWithColorSpace` expects, so no reordering is needed.
+/// Parsed 3D `.cube` LUT. `rgbaTable` is `dimension³` RGBA entries in file order
+/// (red fastest, alpha 1) — the exact layout `CIColorCubeWithColorSpace` wants.
 struct CubeLUT: Equatable, Sendable {
     let dimension: Int
     let rgbaTable: [Float]
-    /// Input domain from DOMAIN_MIN/MAX (defaults 0…1). Non-default domains are
-    /// parsed but not yet remapped — see `CubeLUTParser.Warning`.
+    // Non-default domains are parsed but not yet remapped.
     let domainMin: SIMD3<Float>
     let domainMax: SIMD3<Float>
 
     var cubeData: Data {
         rgbaTable.withUnsafeBufferPointer { Data(buffer: $0) }
+    }
+
+    var base64: String { cubeData.base64EncodedString() }
+
+    init?(base64: String, dimension: Int) {
+        guard dimension >= 2, let data = Data(base64Encoded: base64) else { return nil }
+        let expected = dimension * dimension * dimension * 4
+        guard data.count == expected * MemoryLayout<Float>.size else { return nil }
+        let floats = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        self.init(dimension: dimension, rgbaTable: floats,
+                  domainMin: SIMD3(0, 0, 0), domainMax: SIMD3(1, 1, 1))
+    }
+
+    init(dimension: Int, rgbaTable: [Float], domainMin: SIMD3<Float>, domainMax: SIMD3<Float>) {
+        self.dimension = dimension
+        self.rgbaTable = rgbaTable
+        self.domainMin = domainMin
+        self.domainMax = domainMax
     }
 
     var hasNonDefaultDomain: Bool {
@@ -42,7 +56,6 @@ enum CubeLUTParser {
         }
     }
 
-    /// Parse `.cube` text into a `CubeLUT`. Pure and synchronous — safe to unit test.
     static func parse(_ text: String) throws -> CubeLUT {
         var dimension: Int?
         var domainMin = SIMD3<Float>(0, 0, 0)
@@ -96,9 +109,6 @@ enum CubeLUTParser {
 }
 
 extension CubeLUT: ColorGradeProcessor {
-    /// Build the Core Image filter that applies this LUT in the given working color
-    /// space. The compositor tags output as Rec.709, so pass a 709/sRGB space here
-    /// for SDR-authored film LUTs.
     func makeFilter(colorSpace: CGColorSpace) -> CIFilter? {
         CIFilter(name: "CIColorCubeWithColorSpace", parameters: [
             "inputCubeDimension": dimension,
