@@ -278,14 +278,18 @@ final class ExportService {
         defer { isExporting = false }
         do {
             let renderSize = resolution.renderSize(for: CGSize(width: timeline.width, height: timeline.height))
+            // Bake per-clip grades into sources (709), apply the timeline grade + titles per frame.
             let result = try await CompositionBuilder.build(
                 timeline: timeline,
                 resolveURL: { resolver.resolveURL(for: $0) },
                 renderSize: renderSize,
-                bakeGrades: false
+                bakeGrades: true
             )
+            let timelineFilters = GradePipeline.filters(primaries: timeline.primaries, lut: timeline.lut)
+            let overlays = TextLayerController.exportClipImages(timeline: timeline, canvasSize: renderSize)
+                .map { HDRVideoExporter.TextOverlay(clip: $0.clip, image: CIImage(cgImage: $0.image)) }
             try? FileManager.default.removeItem(at: outputURL)
-            Log.export.notice("hdr export start size=\(Int(renderSize.width))x\(Int(renderSize.height)) url=\(outputURL.lastPathComponent)")
+            Log.export.notice("hdr export start size=\(Int(renderSize.width))x\(Int(renderSize.height)) grade=\(timelineFilters.count) titles=\(overlays.count) url=\(outputURL.lastPathComponent)")
             let inputs = HDRVideoExporter.Inputs(
                 composition: result.composition,
                 videoComposition: result.videoComposition,
@@ -295,7 +299,9 @@ final class ExportService {
                 inputs, renderSize: renderSize, fps: timeline.fps, transfer: .hlg, to: outputURL,
                 onProgress: { [weak self] p in
                     Task { @MainActor in self?.progress = p }
-                }
+                },
+                videoFilters: timelineFilters,
+                textOverlays: overlays
             )
             progress = 1.0
             Log.export.notice("hdr export ok")
