@@ -58,13 +58,15 @@ enum HDRVideoExporter {
         renderSize: CGSize,
         fps: Int,
         transfer: Transfer = .hlg,
-        to outputURL: URL
+        to outputURL: URL,
+        onProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws {
         let composition = inputs.composition
         let videoComposition = inputs.videoComposition
         let audioMix = inputs.audioMix
         let videoTracks = try await composition.loadTracks(withMediaType: .video)
         guard !videoTracks.isEmpty else { throw HDRExportError(reason: "no video tracks") }
+        let totalSeconds = try await composition.load(.duration).seconds
 
         // Re-tag the composition's working space as HDR (the SDR builder hardcodes 709).
         let hdrVC = videoComposition.mutableCopy() as! AVMutableVideoComposition
@@ -128,8 +130,14 @@ enum HDRVideoExporter {
 
         let videoPump = PumpBox(videoInput, videoOutput)
         let audioPump = (audioInput != nil && audioOutput != nil) ? PumpBox(audioInput!, audioOutput!) : nil
+        let progressReporter: (@Sendable (Double) -> Void)?
+        if let onProgress, totalSeconds > 0 {
+            progressReporter = { secs in onProgress(min(1, max(0, secs / totalSeconds))) }
+        } else {
+            progressReporter = nil
+        }
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await pump(videoPump) }
+            group.addTask { await pump(videoPump, onSeconds: progressReporter) }
             if let audioPump { group.addTask { await pump(audioPump) } }
             await group.waitForAll()
         }
@@ -154,9 +162,11 @@ enum HDRVideoExporter {
     }
 
     /// Drain one reader output into one writer input, honoring back-pressure.
-    private static func pump(_ box: PumpBox) async {
+    /// `onSeconds` (video pump only) reports each appended sample's PTS in seconds, throttled.
+    private static func pump(_ box: PumpBox, onSeconds: (@Sendable (Double) -> Void)? = nil) async {
         let queue = DispatchQueue(label: "hdr.pump.\(box.input.mediaType.rawValue)")
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            var lastReported = -1.0
             box.input.requestMediaDataWhenReady(on: queue) {
                 while box.input.isReadyForMoreMediaData {
                     guard let sample = box.output.copyNextSampleBuffer() else {
@@ -168,6 +178,13 @@ enum HDRVideoExporter {
                         box.input.markAsFinished()
                         cont.resume()
                         return
+                    }
+                    if let onSeconds {
+                        let secs = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+                        if secs.isFinite, secs - lastReported >= 0.25 {
+                            lastReported = secs
+                            onSeconds(secs)
+                        }
                     }
                 }
             }

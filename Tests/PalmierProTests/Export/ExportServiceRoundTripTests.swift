@@ -104,6 +104,85 @@ struct ExportServiceRoundTripTests {
         #expect(!videoTracks.isEmpty, "graded export has no video tracks")
     }
 
+    /// Diagnostic: the bar must move off 0% during a real encode (states sequence emits).
+    @Test func exportReportsIntermediateProgress() async throws {
+        let renderSize = CGSize(width: 3840, height: 2160)
+        let blackURL = try await ImageVideoGenerator.blackVideo(size: renderSize)
+        let mediaRef = "black-fixture"
+        var manifest = MediaManifest()
+        manifest.entries = [MediaManifestEntry(
+            id: mediaRef, name: "black", type: .video,
+            source: .external(absolutePath: blackURL.path), duration: 30.0
+        )]
+        let resolver = MediaResolver(manifest: { manifest }, projectURL: { nil })
+        let clip = Fixtures.clip(id: "c1", mediaRef: mediaRef, start: 0, duration: 300)
+        var timeline = Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])])
+        timeline.width = 3840
+        timeline.height = 2160
+
+        let outURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("export-prog-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: outURL) }
+
+        let svc = ExportService()
+        let sampler = Task { @MainActor () -> Bool in
+            var sawIntermediate = false
+            while svc.progress < 1.0 {
+                if svc.progress > 0 { sawIntermediate = true }
+                try? await Task.sleep(for: .milliseconds(20))
+                if !svc.isExporting && svc.progress == 0 { /* not started yet */ }
+            }
+            return sawIntermediate
+        }
+        await svc.export(
+            timeline: timeline, resolver: resolver,
+            format: .h264, resolution: .r4k, outputURL: outURL
+        )
+        let saw = await sampler.value
+        #expect(svc.error == nil, "export error: \(svc.error ?? "")")
+        #expect(saw, "progress never moved off 0 during the encode — states sequence not emitting")
+    }
+
+    /// HDR export uses the AVAssetReader→AVAssetWriter pump, a separate path from the
+    /// AVAssetExportSession one. Guards that it too reports progress instead of sitting at 0%.
+    @Test func hdrExportReportsIntermediateProgress() async throws {
+        let renderSize = CGSize(width: 3840, height: 2160)
+        let blackURL = try await ImageVideoGenerator.blackVideo(size: renderSize)
+        let mediaRef = "black-fixture"
+        var manifest = MediaManifest()
+        manifest.entries = [MediaManifestEntry(
+            id: mediaRef, name: "black", type: .video,
+            source: .external(absolutePath: blackURL.path), duration: 30.0
+        )]
+        let resolver = MediaResolver(manifest: { manifest }, projectURL: { nil })
+        let clip = Fixtures.clip(id: "c1", mediaRef: mediaRef, start: 0, duration: 300)
+        var timeline = Fixtures.timeline(tracks: [Fixtures.videoTrack(clips: [clip])])
+        timeline.width = 3840
+        timeline.height = 2160
+
+        let outURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("export-hdr-\(UUID().uuidString).mov")
+        defer { try? FileManager.default.removeItem(at: outURL) }
+
+        let svc = ExportService()
+        let sampler = Task { @MainActor () -> Bool in
+            var sawIntermediate = false
+            while svc.progress < 1.0 {
+                if svc.progress > 0 { sawIntermediate = true }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            return sawIntermediate
+        }
+        await svc.export(
+            timeline: timeline, resolver: resolver,
+            format: .hevcHDR, resolution: .r4k, outputURL: outURL
+        )
+        let saw = await sampler.value
+        #expect(svc.error == nil, "HDR export error: \(svc.error ?? "")")
+        #expect(FileManager.default.fileExists(atPath: outURL.path))
+        #expect(saw, "HDR progress never moved off 0 during the encode")
+    }
+
     /// Regression for the AVFoundation crash where a transform keyframe at clip-offset 0
     /// caused `emitTransform`'s leading setTransform to overlap the first ramp's time range.
     @Test func exportSurvivesTransformKeyframeAtClipOffsetZero() async throws {

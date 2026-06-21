@@ -292,7 +292,10 @@ final class ExportService {
                 audioMix: result.audioMix
             )
             try await HDRVideoExporter.export(
-                inputs, renderSize: renderSize, fps: timeline.fps, transfer: .hlg, to: outputURL
+                inputs, renderSize: renderSize, fps: timeline.fps, transfer: .hlg, to: outputURL,
+                onProgress: { [weak self] p in
+                    Task { @MainActor in self?.progress = p }
+                }
             )
             progress = 1.0
             Log.export.notice("hdr export ok")
