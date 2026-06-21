@@ -10,7 +10,8 @@ enum LUTExportPass {
         fileType: AVFileType,
         preset: String,
         outputURL: URL? = nil,
-        renderSize: CGSize? = nil
+        renderSize: CGSize? = nil,
+        onProgress: (@Sendable (Float) -> Void)? = nil
     ) async throws -> URL {
         let colorSpace = GradePipeline.workingColorSpace
         let asset = AVURLAsset(url: inputURL)
@@ -38,6 +39,17 @@ enum LUTExportPass {
         try? FileManager.default.removeItem(at: outputURL)
 
         Log.export.notice("grade-pass start")
+        var probe: Task<Void, Never>?
+        if let onProgress {
+            nonisolated(unsafe) let unsafeSession = session
+            probe = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    onProgress(unsafeSession.progress)
+                }
+            }
+        }
+        defer { probe?.cancel() }
         try await session.export(to: outputURL, as: fileType)
         Log.export.notice("grade-pass ok url=\(outputURL.lastPathComponent)")
         return outputURL

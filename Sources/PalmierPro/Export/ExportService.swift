@@ -123,20 +123,36 @@ final class ExportService {
             // AVAssetExportSession fails if the file already exists
             try? FileManager.default.removeItem(at: outputURL)
 
+            // A graded timeline runs a second (color) encode pass. Split the bar so the first
+            // pass fills [0, pass1Span] and the grade pass fills [pass1Span, 1] — otherwise the
+            // bar reaches 100% on pass 1 and freezes for the whole second pass.
+            let willGrade = !GradePipeline.filters(primaries: timeline.primaries, lut: timeline.lut).isEmpty
+            let pass1Span = willGrade ? 0.5 : 1.0
+
             nonisolated(unsafe) let unsafeSession = session
             let progressTask = Task { @MainActor in
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(200))
-                    let p = Double(unsafeSession.progress)
+                    let p = Double(unsafeSession.progress) * pass1Span
                     if p != self.progress { self.progress = p }
                 }
             }
+            defer { progressTask.cancel() }
 
             do {
                 try await session.export(to: outputURL, as: fileType)
+                // Stop polling pass 1 before the grade pass drives the bar, so they don't fight.
+                progressTask.cancel()
+                if willGrade { progress = pass1Span }
                 try await applyLUTPassIfNeeded(
                     timeline: timeline, format: format,
-                    resolution: resolution, fileType: fileType, outputURL: outputURL
+                    resolution: resolution, fileType: fileType, outputURL: outputURL,
+                    onProgress: { [weak self] p in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            self.progress = pass1Span + (1 - pass1Span) * Double(p)
+                        }
+                    }
                 )
                 progress = 1.0
                 Log.export.notice(
@@ -161,8 +177,6 @@ final class ExportService {
                     )
                 }
             }
-
-            progressTask.cancel()
         } catch {
             self.error = Log.detail(error)
             Log.export.error(
@@ -226,28 +240,27 @@ final class ExportService {
     }
 
     /// Grade the just-exported file in place when the timeline carries any grade.
+    /// A failure here is surfaced (not swallowed): the grade is the second half of the export,
+    /// so silently dropping it leaves a wrong-looking file with no error shown.
     private func applyLUTPassIfNeeded(
         timeline: Timeline,
         format: ExportFormat,
         resolution: ExportResolution,
         fileType: AVFileType,
-        outputURL: URL
+        outputURL: URL,
+        onProgress: (@Sendable (Float) -> Void)? = nil
     ) async throws {
         let filters = GradePipeline.filters(primaries: timeline.primaries, lut: timeline.lut)
         guard !filters.isEmpty else { return }
-        do {
-            let gradedURL = try await LUTExportPass.apply(
-                processor: FilterChainProcessor(filters: filters),
-                to: outputURL, fileType: fileType,
-                preset: exportPresetName(format: format, resolution: resolution)
-            )
-            // Swap the graded file over the original export.
-            try? FileManager.default.removeItem(at: outputURL)
-            try FileManager.default.moveItem(at: gradedURL, to: outputURL)
-        } catch {
-            // Don't fail the whole export over a bad grade — keep the ungraded file.
-            Log.export.error("grade-pass skipped: \(Log.detail(error))")
-        }
+        let gradedURL = try await LUTExportPass.apply(
+            processor: FilterChainProcessor(filters: filters),
+            to: outputURL, fileType: fileType,
+            preset: exportPresetName(format: format, resolution: resolution),
+            onProgress: onProgress
+        )
+        // Swap the graded file over the original export.
+        try? FileManager.default.removeItem(at: outputURL)
+        try FileManager.default.moveItem(at: gradedURL, to: outputURL)
     }
 
     /// Build the composition, then encode HEVC Main10 HDR (no text/LUT on this path yet).
