@@ -3,9 +3,8 @@ import CoreImage
 import VideoToolbox
 
 /// HEVC Main10 BT.2020 HLG/PQ export via `AVAssetReader` → `AVAssetWriter`, since
-/// `AVAssetExportSession` presets can't emit 10-bit HDR.
-/// Reader path limitations: text overlays (CoreAnimationTool is export-session only)
-/// and SDR `.cube` LUTs are not applied here.
+/// `AVAssetExportSession` presets can't emit 10-bit HDR. Each frame is converted from the
+/// compositor's SDR Rec.709 to HLG BT.2020 in CoreImage (with grade + titles applied there).
 enum HDRVideoExporter {
 
     enum Transfer { case hlg, pq }
@@ -78,19 +77,14 @@ enum HDRVideoExporter {
         guard !videoTracks.isEmpty else { throw HDRExportError(reason: "no video tracks") }
         let totalSeconds = try await composition.load(.duration).seconds
 
-        // Re-tag the composition's working space as HDR (the SDR builder hardcodes 709).
-        let hdrVC = videoComposition.mutableCopy() as! AVMutableVideoComposition
-        hdrVC.colorPrimaries = AVVideoColorPrimaries_ITU_R_2020
-        hdrVC.colorTransferFunction = transfer == .hlg
-            ? AVVideoTransferFunction_ITU_R_2100_HLG
-            : AVVideoTransferFunction_SMPTE_ST_2084_PQ
-        hdrVC.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_2020
-
+        // Read the compositor's native SDR Rec.709 frames; the 709 → HLG conversion happens per
+        // frame in CoreImage. Relabeling the composition HLG would tag the output HDR without
+        // converting the pixels, so SDR midtones display at HDR brightness — blown out.
         let reader = try AVAssetReader(asset: composition)
         let videoOutput = AVAssetReaderVideoCompositionOutput(
             videoTracks: videoTracks, videoSettings: readerVideoSettings
         )
-        videoOutput.videoComposition = hdrVC
+        videoOutput.videoComposition = videoComposition
         videoOutput.alwaysCopiesSampleData = false
         guard reader.canAdd(videoOutput) else { throw HDRExportError(reason: "cannot add video output") }
         reader.add(videoOutput)
@@ -130,33 +124,27 @@ enum HDRVideoExporter {
             if writer.canAdd(aIn) { writer.add(aIn); audioInput = aIn }
         }
 
-        // Grade + titles are applied per frame via CoreImage in the SDR working space, then
-        // rendered out to the 10-bit HLG buffer (709 → HLG maps SDR white to graphics-white).
+        // Every HDR frame is processed in CoreImage: decode the SDR 709 frame, apply the grade,
+        // composite titles, and convert 709 → HLG on output (SDR white → HLG graphics-white).
         // The adaptor must be created before the writer starts.
-        let needsProcessing = !videoFilters.isEmpty || !textOverlays.isEmpty
-        let processing: ProcessingContext?
-        if needsProcessing {
-            let attrs: [String: Any] = [
-                kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
-                kCVPixelBufferWidthKey as String: Int(renderSize.width),
-                kCVPixelBufferHeightKey as String: Int(renderSize.height),
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:],
-            ]
-            let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-                assetWriterInput: videoInput, sourcePixelBufferAttributes: attrs
-            )
-            let hlgSpace = CGColorSpace(name: CGColorSpace.itur_2100_HLG)
-                ?? CGColorSpace(name: CGColorSpace.itur_2020) ?? GradePipeline.workingColorSpace
-            let ctx = CIContext(options: [.workingColorSpace: GradePipeline.workingColorSpace])
-            processing = ProcessingContext(
-                input: videoInput, output: videoOutput, adaptor: adaptor, ciContext: ctx,
-                processor: FilterChainProcessor(filters: videoFilters), overlays: textOverlays,
-                fps: fps, renderSize: renderSize, hlgSpace: hlgSpace,
-                workingSpace: GradePipeline.workingColorSpace
-            )
-        } else {
-            processing = nil
-        }
+        let attrs: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+            kCVPixelBufferWidthKey as String: Int(renderSize.width),
+            kCVPixelBufferHeightKey as String: Int(renderSize.height),
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:],
+        ]
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: videoInput, sourcePixelBufferAttributes: attrs
+        )
+        let hlgSpace = CGColorSpace(name: CGColorSpace.itur_2100_HLG)
+            ?? CGColorSpace(name: CGColorSpace.itur_2020) ?? GradePipeline.workingColorSpace
+        let ctx = CIContext(options: [.workingColorSpace: GradePipeline.workingColorSpace])
+        let processing = ProcessingContext(
+            input: videoInput, output: videoOutput, adaptor: adaptor, ciContext: ctx,
+            processor: FilterChainProcessor(filters: videoFilters), overlays: textOverlays,
+            fps: fps, renderSize: renderSize, inputSpace: GradePipeline.workingColorSpace,
+            hlgSpace: hlgSpace, workingSpace: GradePipeline.workingColorSpace
+        )
 
         guard reader.startReading() else {
             throw HDRExportError(reason: "reader start: \(reader.error?.localizedDescription ?? "?")")
@@ -174,13 +162,8 @@ enum HDRVideoExporter {
             progressReporter = nil
         }
 
-        let videoPump = PumpBox(videoInput, videoOutput)
         await withTaskGroup(of: Void.self) { group in
-            if let processing {
-                group.addTask { await pumpVideoProcessed(processing, onSeconds: progressReporter) }
-            } else {
-                group.addTask { await pump(videoPump, onSeconds: progressReporter) }
-            }
+            group.addTask { await pumpVideoProcessed(processing, onSeconds: progressReporter) }
             if let audioPump { group.addTask { await pump(audioPump) } }
             await group.waitForAll()
         }
@@ -204,6 +187,7 @@ enum HDRVideoExporter {
         let overlays: [TextOverlay]
         let fps: Int
         let renderSize: CGSize
+        let inputSpace: CGColorSpace
         let hlgSpace: CGColorSpace
         let workingSpace: CGColorSpace
     }
@@ -226,7 +210,7 @@ enum HDRVideoExporter {
                         return
                     }
                     let pts = CMSampleBufferGetPresentationTimeStamp(sample)
-                    var image = CIImage(cvPixelBuffer: srcBuffer, options: [.colorSpace: c.hlgSpace])
+                    var image = CIImage(cvPixelBuffer: srcBuffer, options: [.colorSpace: c.inputSpace])
                     image = c.processor.process(image, colorSpace: c.workingSpace)
 
                     let frame = Int((pts.seconds * Double(c.fps)).rounded())
