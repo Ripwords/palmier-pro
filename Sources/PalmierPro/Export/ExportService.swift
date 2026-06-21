@@ -129,12 +129,14 @@ final class ExportService {
             let willGrade = !GradePipeline.filters(primaries: timeline.primaries, lut: timeline.lut).isEmpty
             let pass1Span = willGrade ? 0.5 : 1.0
 
+            // The async export(to:as:) API does not update the legacy `.progress` property —
+            // observe the states sequence instead, or the bar stays pinned at 0%.
             nonisolated(unsafe) let unsafeSession = session
             let progressTask = Task { @MainActor in
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(200))
-                    let p = Double(unsafeSession.progress) * pass1Span
-                    if p != self.progress { self.progress = p }
+                for await state in unsafeSession.states(updateInterval: 0.2) {
+                    if case .exporting(let p) = state {
+                        self.progress = p.fractionCompleted * pass1Span
+                    }
                 }
             }
             defer { progressTask.cancel() }

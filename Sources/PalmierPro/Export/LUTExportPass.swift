@@ -43,9 +43,8 @@ enum LUTExportPass {
         if let onProgress {
             nonisolated(unsafe) let unsafeSession = session
             probe = Task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(200))
-                    onProgress(unsafeSession.progress)
+                for await state in unsafeSession.states(updateInterval: 0.2) {
+                    if case .exporting(let p) = state { onProgress(Float(p.fractionCompleted)) }
                 }
             }
         }
